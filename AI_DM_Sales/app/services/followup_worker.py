@@ -10,6 +10,7 @@ from app.core.database import (
     get_fan_ppv_transactions,
     get_fan_record,
     get_pending_fomo_reminders,
+    get_thread_detail,
     get_unlocked_ppv_ids,
     get_unlocked_ppv_transactions,
     mark_fan_fomo_reminders_sent,
@@ -96,6 +97,41 @@ class FollowupWorker:
             thread.join(timeout=timeout)
         logger.info("FollowupWorker background thread stopped.")
         return True
+
+    def _is_fan_busy_in_session_or_unanswered(
+        self,
+        char_id: str,
+        fan_id: str,
+        db_path: Optional[str] = None,
+    ) -> bool:
+        """
+        対象ファンに対して:
+        1) BotManager / CharacterBotWorker 側で自動返信カウントダウン中または送信待ちキューがある、または
+        2) DB上の最新メッセージがファンからの未返信メッセージ (sender == 'fan') である
+        場合は、通常返信とのセッション競合・追い越し送信を防ぐため追撃を見送る。
+        """
+        if self.bot_mgr is not None and hasattr(self.bot_mgr, "has_active_session_activity"):
+            try:
+                if self.bot_mgr.has_active_session_activity(char_id, fan_id):
+                    return True
+            except Exception:
+                pass
+        elif self.bot_mgr is not None and hasattr(self.bot_mgr, "get_pending_replies"):
+            try:
+                pend = self.bot_mgr.get_pending_replies(char_id=char_id, fan_id=fan_id)
+                if pend:
+                    return True
+            except Exception:
+                pass
+
+        try:
+            detail = get_thread_detail(char_id, fan_id, db_path=db_path) or {}
+            msgs = detail.get("messages") or []
+            if msgs and str(msgs[-1].get("sender") or "") == "fan":
+                return True
+        except Exception:
+            pass
+        return False
 
     def generate_fomo_reminder_messages(
         self,
@@ -216,14 +252,10 @@ class FollowupWorker:
             if int(fan_rec.get("manual_hold") or 0) == 1:
                 continue
 
-            # 二重送信・連続送信防止のため、同一ファンの全未追撃PPVを先に一括で reminder_sent = 1 へ更新
-            marked_count = mark_fan_fomo_reminders_sent(
-                char_id=cid,
-                fan_id=fid,
-                tx_ids=tx_ids,
-                db_path=db_path,
-            )
-            if marked_count <= 0:
+            if self._is_fan_busy_in_session_or_unanswered(cid, fid, db_path=db_path):
+                logger.info(
+                    f"[{cid}] Deferring FOMO reminder for @{fid}: active reply countdown/outbox or unanswered fan DM"
+                )
                 continue
 
             msgs = self.generate_fomo_reminder_messages(
@@ -231,20 +263,17 @@ class FollowupWorker:
                 username=uname,
                 offered_price=price,
                 ppv_id=ppv_id,
-                pending_count=max(len(fan_items), marked_count),
+                pending_count=len(fan_items),
             )
             msg_en = msgs["en"]
             msg_ja = msgs["ja"]
 
-            add_dm_message(
-                char_id=cid,
-                fan_id=fid,
-                sender="ai",
-                content=msg_en,
-                sales_phase=str(rep_item.get("sales_phase") or "4_Lock_Close"),
-                content_ja=msg_ja,
-                db_path=db_path,
-            )
+            # LLM生成中にファンから新着DMが届いていないか再確認
+            if self._is_fan_busy_in_session_or_unanswered(cid, fid, db_path=db_path):
+                logger.info(
+                    f"[{cid}] Deferring FOMO reminder post-generation for @{fid}: active reply countdown/outbox or unanswered fan DM"
+                )
+                continue
 
             queued = self.bot_mgr.enqueue_outbound_message(
                 char_id=cid,
@@ -254,6 +283,27 @@ class FollowupWorker:
                 message_ja=msg_ja,
                 offered_price=price,
                 source="fomo_reminder",
+            )
+            if isinstance(queued, dict) and queued.get("skipped_active_pending_reply"):
+                continue
+
+            marked_count = mark_fan_fomo_reminders_sent(
+                char_id=cid,
+                fan_id=fid,
+                tx_ids=tx_ids,
+                db_path=db_path,
+            )
+            if marked_count <= 0:
+                continue
+
+            add_dm_message(
+                char_id=cid,
+                fan_id=fid,
+                sender="ai",
+                content=msg_en,
+                sales_phase=str(rep_item.get("sales_phase") or "4_Lock_Close"),
+                content_ja=msg_ja,
+                db_path=db_path,
             )
 
             with self._lock:
@@ -365,6 +415,12 @@ class FollowupWorker:
             if int(fan_rec.get("manual_hold") or 0) == 1:
                 continue
 
+            if self._is_fan_busy_in_session_or_unanswered(cid, fid, db_path=db_path):
+                logger.info(
+                    f"[{cid}] Deferring Step 2 followup for @{fid}: active reply countdown/outbox or unanswered fan DM"
+                )
+                continue
+
             if cid not in vault_cache:
                 vault_cache[cid] = load_vault_items(cid)
             if cid not in plans_cache:
@@ -468,6 +524,26 @@ class FollowupWorker:
         msg_en = msgs["en"]
         msg_ja = msgs["ja"]
 
+        # LLM生成中にファンから新着DMが届いていないか再確認
+        if self._is_fan_busy_in_session_or_unanswered(cid, fid, db_path=db_path):
+            logger.info(
+                f"[{cid}] Deferring Step 2 followup post-generation for @{fid}: active reply countdown/outbox or unanswered fan DM"
+            )
+            return
+
+        queued = self.bot_mgr.enqueue_outbound_message(
+            char_id=cid,
+            fan_id=fid,
+            username=uname,
+            message_en=msg_en,
+            message_ja=msg_ja,
+            ppv_item=chosen_step2,
+            offered_price=offered_price,
+            source="step2_followup",
+        )
+        if isinstance(queued, dict) and queued.get("skipped_active_pending_reply"):
+            return
+
         tx_id = record_ppv_offer(
             char_id=cid,
             fan_id=fid,
@@ -494,17 +570,6 @@ class FollowupWorker:
             fan_id=fid,
             sales_phase="4_Lock_Close",
             db_path=db_path,
-        )
-
-        queued = self.bot_mgr.enqueue_outbound_message(
-            char_id=cid,
-            fan_id=fid,
-            username=uname,
-            message_en=msg_en,
-            message_ja=msg_ja,
-            ppv_item=chosen_step2,
-            offered_price=offered_price,
-            source="step2_followup",
         )
 
         with self._lock:

@@ -170,7 +170,19 @@ def run_dormant_revival(
         if not cid or not fid:
             continue
 
+        if int(fan.get("manual_hold") or 0) == 1:
+            continue
+
+        if target_bot_mgr is not None and hasattr(target_bot_mgr, "has_active_session_activity"):
+            try:
+                if target_bot_mgr.has_active_session_activity(cid, fid):
+                    continue
+            except Exception:
+                pass
+
         if not ignore_sleep:
+            if not bool(load_settings(cid).get("bot_enabled", False)):
+                continue
             sleeping, _ = check_char_sleep_state(cid, now_dt=ref_now)
             if sleeping:
                 skipped_sleeping.append(f"{cid}:@{uname}")
@@ -190,6 +202,19 @@ def run_dormant_revival(
         msg_ja = generated["content_ja"]
         prompt_ver = generated["prompt_version"]
 
+        queued = target_bot_mgr.enqueue_outbound_message(
+            char_id=cid,
+            fan_id=fid,
+            username=uname,
+            message_en=msg_en,
+            message_ja=msg_ja,
+            ppv_item=None,
+            offered_price=None,
+            source="dormant_revival",
+        )
+        if isinstance(queued, dict) and queued.get("skipped_active_pending_reply"):
+            continue
+
         msg_row = add_dm_message(
             char_id=cid,
             fan_id=fid,
@@ -206,17 +231,6 @@ def run_dormant_revival(
             sales_phase="2_Explore",
             last_contact_at=ref_now_iso,
             db_path=db_path,
-        )
-
-        queued = target_bot_mgr.enqueue_outbound_message(
-            char_id=cid,
-            fan_id=fid,
-            username=uname,
-            message_en=msg_en,
-            message_ja=msg_ja,
-            ppv_item=None,
-            offered_price=None,
-            source="dormant_revival",
         )
         logger.info(
             f"[{cid}] Dormant revival DM generated & queued for @{uname} "

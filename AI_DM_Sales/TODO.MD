@@ -30,7 +30,7 @@
 
 ---
 
-### - [ ] TICKET-03: [バグ修正] 営業モニタリングにおける待機時間完了後のDM返信未送信・セッション競合バグ解消 【実行モデル：gem-build-carbon (Gemini 4 Carbon)】
+### - [x] TICKET-03: [バグ修正] 営業モニタリングにおける待機時間完了後のDM返信未送信・セッション競合バグ解消 【実行モデル：gem-build-carbon (Gemini 4 Carbon)】
 - **対象ファイル（確定）**
   - `app/services/fansly_dm_bot.py`（3043行）
   - `app/services/followup_worker.py`（583行）

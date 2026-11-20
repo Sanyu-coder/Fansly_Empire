@@ -1,11 +1,43 @@
 import atexit
+import os
+import subprocess
 import sys
+import time
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
     sys.stderr.reconfigure(encoding="utf-8")
 except Exception:
     pass
+
+
+def _terminate_stale_dm_sales_instances() -> None:
+    """
+    Windows のソケット共有仕様による旧 run_dm_sales.py プロセス残存・Playwright プロファイル競合を防ぐため、
+    起動時に自分以外の run_dm_sales.py および AI_DM_Sales\\profiles を保持している孤児 headless ブラウザのみを終了する。
+    """
+    if os.name != "nt":
+        return
+    my_pid = os.getpid()
+    ps_cmd = (
+        f"$myPid = {my_pid}; "
+        "Get-CimInstance Win32_Process | Where-Object { "
+        "($_.ProcessId -ne $myPid) -and ("
+        "($_.Name -eq 'python.exe' -and $_.CommandLine -like '*AI_DM_Sales*run_dm_sales.py*') -or "
+        "($_.Name -eq 'chrome-headless-shell.exe' -and $_.CommandLine -like '*AI_DM_Sales*profiles*')"
+        ") } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+    )
+    try:
+        subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_cmd],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=8,
+            check=False,
+        )
+        time.sleep(0.8)
+    except Exception:
+        pass
 
 from app import create_app
 from app.core import config
@@ -34,6 +66,7 @@ def _cleanup_all_workers() -> None:
 atexit.register(_cleanup_all_workers)
 
 if __name__ == "__main__":
+    _terminate_stale_dm_sales_instances()
     # キャラクター別プロファイル初期化＆常時DM巡回監視（稼働OFF時も受信・翻訳・カルテ更新のみ継続）＋ウォッチドッグ自動復旧を起動
     bot_manager.start_monitoring_all()
     bot_manager.start_watchdog()

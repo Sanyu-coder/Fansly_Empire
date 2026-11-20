@@ -15,6 +15,7 @@ from app.core.database import (
     add_dm_message,
     append_fan_decision_log,
     get_fan_record,
+    get_fan_threads,
     get_system_reply_delay_settings,
     get_thread_detail,
     has_eligible_locked_ppv_for_unlock,
@@ -191,6 +192,20 @@ FANSLY_SELECTORS: Dict[str, List[str]] = {
     ],
     "upload_preview_file_input": [
         "app-account-media-upload-v2 input[type='file']:not([multiple])",
+    ],
+    "media_editor_modal": [
+        "app-media-editor",
+        ".modal.image-editor",
+    ],
+    "media_editor_done": [
+        "app-media-editor .modal-footer button.solid-blue",
+        "app-media-editor button.solid-blue",
+        "app-media-editor button:has-text('Done')",
+        "app-media-editor button:has-text('完了')",
+    ],
+    "media_editor_cancel": [
+        "app-media-editor .modal-footer button.btn.v2.text",
+        "app-media-editor .editor-top button[aria-label='Close']",
     ],
     "upload_perm_remove_chip": [
         "app-permission-rows-editor button.perm-cond-remove",
@@ -504,12 +519,17 @@ class CharacterBotWorker:
         self.vault_dir = paths.get("vault_dir") or os.path.join(config.CHARACTERS_ROOT, char_id, "ppv_vault")
 
         self._lock = threading.RLock()
+        self._page_lock = threading.RLock()
         self._stop_event = threading.Event()
+        self._wake_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._outbox_queue: "queue.Queue[Dict[str, Any]]" = queue.Queue()
         self._active_context: Any = None
         self._active_pw: Any = None
         self._active_page: Any = None
+        self._in_busy_op: bool = False
+        self._max_send_retries: int = 3
+        self._retry_backoff_base_sec: float = 8.0
 
         self.running: bool = False
         self.manual_login_active: bool = False
@@ -528,6 +548,7 @@ class CharacterBotWorker:
         self._checked_read_previews: Dict[str, str] = {}
         self._last_replied_fingerprints: Dict[str, str] = {}
         self._monitored_only_fingerprints: Dict[str, str] = {}
+        self._unanswered_recheck_after_ts: Dict[str, float] = {}
         self._pending_replies: Dict[str, Dict[str, Any]] = {}
 
     def touch_heartbeat(self) -> None:
@@ -566,6 +587,7 @@ class CharacterBotWorker:
             old_stop_event = self._stop_event
             old_thread = self._thread
             old_stop_event.set()
+            self._wake_event.set()
             self.running = False
             self._thread = None
 
@@ -576,10 +598,18 @@ class CharacterBotWorker:
 
         with self._lock:
             self._stop_event = threading.Event()
+            self._wake_event.clear()
+            self._in_busy_op = False
             self.consecutive_poll_failures = 0
             self.restart_count += 1
             self.last_restart_at = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
             self.last_restart_reason = reason
+            # 再起動前に送信途中 (sending_typing) で中断した未完了エントリがあれば待機状態へ安全に戻す
+            for pend in self._pending_replies.values():
+                if not pend["cancel_event"].is_set() and pend.get("stage") == "sending_typing":
+                    pend["stage"] = "retrying_after_restart"
+                    pend["typing_done"] = True
+                    pend["typing_delay_sec"] = 0.0
 
         return self.start()
 
@@ -595,6 +625,7 @@ class CharacterBotWorker:
             if self.running and self._thread and self._thread.is_alive():
                 return True
             self._stop_event.clear()
+            self._wake_event.clear()
             self.running = True
             self.touch_heartbeat()
             self._thread = threading.Thread(
@@ -610,6 +641,7 @@ class CharacterBotWorker:
         self.cancel_all_pending_replies()
         with self._lock:
             self._stop_event.set()
+            self._wake_event.set()
             self.running = False
             thread = self._thread
             self._thread = None
@@ -619,6 +651,21 @@ class CharacterBotWorker:
             self._force_close_browser_resources()
         logger.info(f"[{self.char_id}] CharacterBotWorker stopped")
         return True
+
+    def has_active_session_activity(self, fan_id: str) -> bool:
+        """指定ファンに対して自動返信カウントダウン中または未送信キューが存在するか判定する（追撃競合防止用）"""
+        target_fid = str(fan_id or "").strip()
+        if not target_fid:
+            return False
+        with self._lock:
+            pend = self._pending_replies.get(target_fid)
+            if pend is not None and not pend["cancel_event"].is_set():
+                return True
+            with self._outbox_queue.mutex:
+                for q_item in self._outbox_queue.queue:
+                    if str(q_item.get("fan_id") or "").strip() == target_fid:
+                        return True
+        return False
 
     def get_pending_replies_snapshot(self, fan_id: Optional[str] = None) -> Dict[str, Dict[str, Any]]:
         """現在待機カウントダウン中の自動返信ステータスを取得する"""
@@ -643,6 +690,7 @@ class CharacterBotWorker:
                     "scheduled_time_hms": entry.get("scheduled_time_hms", ""),
                     "scheduled_at_iso": entry.get("scheduled_at_iso", ""),
                     "total_delay_sec": entry.get("total_delay_sec", 0),
+                    "retry_count": int(entry.get("retry_count") or 0),
                     "ai_preview_en": str(entry.get("ai_en") or "")[:160],
                     "ai_preview_ja": str(entry.get("ai_ja") or "")[:160],
                 }
@@ -684,18 +732,38 @@ class CharacterBotWorker:
 
     def enqueue_outbound(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """追撃ワーカー (FollowupWorker) や手動介入から送信キューへ投入する"""
+        source = str(payload.get("source") or "followup")
+        target_fid = str(payload.get("fan_id") or "").strip()
+        if source != "human_manual" and target_fid:
+            with self._lock:
+                pend = self._pending_replies.get(target_fid)
+                if pend is not None and not pend["cancel_event"].is_set():
+                    logger.info(
+                        f"[{self.char_id}] Deferred/skipped outbox enqueue ({source}) for @{target_fid}: "
+                        "auto-reply countdown currently active"
+                    )
+                    return {
+                        "char_id": self.char_id,
+                        "fan_id": target_fid,
+                        "source": source,
+                        "skipped_active_pending_reply": True,
+                        "queued_at": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+                    }
         item = {
             "char_id": self.char_id,
-            "fan_id": str(payload.get("fan_id") or "").strip(),
+            "fan_id": target_fid,
             "username": str(payload.get("username") or payload.get("fan_id") or "").strip(),
             "message_en": normalize_dm_message_text(payload.get("message_en")),
             "message_ja": normalize_dm_message_text(payload.get("message_ja")),
             "ppv_item": payload.get("ppv_item"),
             "offered_price": payload.get("offered_price"),
-            "source": str(payload.get("source") or "followup"),
+            "source": source,
+            "retry_count": int(payload.get("retry_count") or 0),
+            "next_attempt_ts": float(payload.get("next_attempt_ts") or 0.0),
             "queued_at": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
         }
         self._outbox_queue.put(item)
+        self._wake_event.set()
         return item
 
     def get_status(self, now_dt: Optional[datetime] = None) -> Dict[str, Any]:
@@ -730,7 +798,12 @@ class CharacterBotWorker:
                 "last_error": self.last_error,
             }
 
-    def _wait_interruptible(self, seconds: float, cancel_event: Optional[threading.Event] = None) -> bool:
+    def _wait_interruptible(
+        self,
+        seconds: float,
+        cancel_event: Optional[threading.Event] = None,
+        wake_on_activity: bool = False,
+    ) -> bool:
         """停止イベントまたは個別キャンセルイベントを監視しながら指定秒数待機する"""
         if seconds <= 0:
             if self._stop_event.is_set() or (cancel_event is not None and cancel_event.is_set()):
@@ -741,6 +814,9 @@ class CharacterBotWorker:
         while time.time() < end_time:
             if self._stop_event.is_set() or (cancel_event is not None and cancel_event.is_set()):
                 return False
+            if wake_on_activity and self._wake_event.is_set():
+                self._wake_event.clear()
+                return True
             now_t = time.time()
             if now_t - last_hb >= 5.0:
                 self.touch_heartbeat()
@@ -844,6 +920,9 @@ class CharacterBotWorker:
         if skip_res is not None:
             return skip_res
 
+        # 非同期カウントダウン予約時 (async_schedule=True) は、実ブラウザでの送信が成功するまで
+        # fans.sales_phase や psych_profile を先行コミットしない（送信失敗・再起動時のステージ暴走防止）
+        defer_state_commit = bool(async_schedule and page is not None)
         engine_res = sales_engine.process_fan_message(
             char_id=self.char_id,
             user_message=fan_message_en,
@@ -855,7 +934,7 @@ class CharacterBotWorker:
             consecutive_unanswered=unanswered_count,
             recent_messages=recent_messages[:-1] if recent_messages else [],
             existing_profile_json=existing_profile,
-            persist_db=True,
+            persist_db=not defer_state_commit,
             record_tip_in_db=False,
             db_path=db_path,
         )
@@ -876,6 +955,10 @@ class CharacterBotWorker:
             db_path=db_path,
             async_schedule=async_schedule,
             allow_when_bot_off=force_auto_reply,
+            detected_tier=detected_tier,
+            total_spent_usd=total_spent,
+            consecutive_ppv_ignored=ignored_count,
+            defer_state_commit=defer_state_commit,
         )
         if res.get("ok") and res.get("action") in ("replied", "escalated_emergency_stop"):
             self._last_replied_fingerprints[fan_id] = fan_message_en.strip()
@@ -993,6 +1076,10 @@ class CharacterBotWorker:
         custom_delay_sec: Optional[float] = None,
         allow_when_bot_off: bool = False,
         db_path: Optional[str] = None,
+        detected_tier: Optional[str] = None,
+        total_spent_usd: Optional[float] = None,
+        consecutive_ppv_ignored: Optional[int] = None,
+        defer_state_commit: bool = False,
     ) -> Dict[str, Any]:
         """AI応答を待機カウントダウン辞書へ登録する"""
         ai_en = normalize_dm_message_text(engine_res.get("ai_en") or engine_res.get("ai_reply"))
@@ -1037,7 +1124,7 @@ class CharacterBotWorker:
                     f" → ベース {delay_calc['base_delay_sec']}秒 → 決定待機 {delay_calc['final_delay_sec']}秒"
                 ),
             }
-            if fan_id:
+            if fan_id and not defer_state_commit:
                 append_fan_decision_log(self.char_id, fan_id, dlog, db_path=db_path)
 
         logger.info(
@@ -1060,7 +1147,13 @@ class CharacterBotWorker:
             "selected_ppv": selected_ppv,
             "tip_hook": engine_res.get("tip_hook") if isinstance(engine_res.get("tip_hook"), dict) else {},
             "tip_tx_id": engine_res.get("tip_tx_id"),
-            "decision_log": engine_res.get("decision_log"),
+            "decision_log": dlog,
+            "psych_profile": engine_res.get("psych_profile") if isinstance(engine_res.get("psych_profile"), dict) else None,
+            "is_low_priority": int(engine_res.get("is_low_priority") or 0),
+            "detected_tier": detected_tier,
+            "total_spent_usd": total_spent_usd,
+            "consecutive_ppv_ignored": consecutive_ppv_ignored,
+            "defer_state_commit": bool(defer_state_commit),
             "read_delay_sec": round(read_delay, 2),
             "typing_delay_sec": round(typing_delay, 2),
             "total_delay_sec": round(read_delay + typing_delay, 1),
@@ -1070,6 +1163,9 @@ class CharacterBotWorker:
             "scheduled_time_hms": sched_dt.strftime("%H:%M:%S"),
             "scheduled_at_iso": sched_dt.strftime("%Y-%m-%dT%H:%M:%S"),
             "stage": "waiting_read_delay",
+            "retry_count": 0,
+            "typing_done": False,
+            "committed": False,
             "allow_when_bot_off": allow_when_bot_off,
             "cancel_event": threading.Event(),
             "db_path": db_path,
@@ -1079,6 +1175,7 @@ class CharacterBotWorker:
             if old_entry is not None:
                 old_entry["cancel_event"].set()
             self._pending_replies[fan_id] = entry
+        self._wake_event.set()
         return entry
 
     def _dispatch_sales_engine_reply(
@@ -1092,8 +1189,27 @@ class CharacterBotWorker:
         db_path: Optional[str] = None,
         async_schedule: bool = False,
         allow_when_bot_off: bool = False,
+        detected_tier: Optional[str] = None,
+        total_spent_usd: Optional[float] = None,
+        consecutive_ppv_ignored: Optional[int] = None,
+        defer_state_commit: bool = False,
     ) -> Dict[str, Any]:
         if int(engine_res.get("is_escalated") or 0) == 1:
+            if defer_state_commit:
+                upsert_fan_sales_state(
+                    char_id=self.char_id,
+                    fan_id=fan_id,
+                    username=username or fan_id,
+                    current_tier=detected_tier,
+                    total_spent_usd=total_spent_usd,
+                    sales_phase="0_Escalated",
+                    is_escalated=1,
+                    escalation_reason=str(engine_res.get("escalation_reason") or "Emergency stop"),
+                    psych_profile_dict=engine_res.get("psych_profile") if isinstance(engine_res.get("psych_profile"), dict) else None,
+                    db_path=db_path,
+                )
+                if isinstance(engine_res.get("decision_log"), dict):
+                    append_fan_decision_log(self.char_id, fan_id, engine_res["decision_log"], db_path=db_path)
             logger.warning(
                 f"[{self.char_id}] Emergency escalation triggered for @{fan_id}: "
                 f"{engine_res.get('escalation_reason')}"
@@ -1114,6 +1230,10 @@ class CharacterBotWorker:
             engine_res=engine_res,
             allow_when_bot_off=allow_when_bot_off,
             db_path=db_path,
+            detected_tier=detected_tier,
+            total_spent_usd=total_spent_usd,
+            consecutive_ppv_ignored=consecutive_ppv_ignored,
+            defer_state_commit=defer_state_commit,
         )
         snap = self.get_pending_replies_snapshot(fan_id).get(fan_id)
         logger.info(
@@ -1139,6 +1259,102 @@ class CharacterBotWorker:
 
         return self._execute_pending_reply_entry(entry, page=page)
 
+    def _verify_message_already_sent_in_dom(self, page: Any, fan_id: str, message_en: str) -> bool:
+        """
+        送信タイムアウトや例外発生後のリトライ前に、直近の自分側バブル (my-message) に
+        同一本文が既に反映済みか検証し、二重送信を防止する。
+        """
+        if page is None or not hasattr(page, "evaluate"):
+            return False
+        target_norm = normalize_dm_message_text(message_en).strip()
+        if not target_norm:
+            return False
+        try:
+            if not self._ensure_fan_conversation_open(page, fan_id):
+                return False
+            matched = page.evaluate(
+                r"""(expectedText) => {
+                    const norm = (s) => String(s || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+                    const expected = norm(expectedText);
+                    if (!expected) return false;
+                    const myMsgs = Array.from(document.querySelectorAll('app-group-message.my-message'));
+                    const recentMine = myMsgs.slice(-3);
+                    for (const el of recentMine) {
+                        const txtEl = el.querySelector('.message-text');
+                        const t = txtEl ? norm(txtEl.innerText || txtEl.textContent || '') : '';
+                        if (t && t === expected) {
+                            return true;
+                        }
+                    }
+                    return false;
+                }""",
+                target_norm,
+            )
+            return bool(matched)
+        except Exception:
+            return False
+
+    def _reschedule_pending_reply_retry(
+        self,
+        entry: Dict[str, Any],
+        reason: str,
+        delay_sec: Optional[float] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """ブラウザ未準備や一時的な送信失敗時に安全にバックオフ再スケジュールする（上限超過時はNone）"""
+        fan_id = str(entry["fan_id"])
+        cancel_ev: threading.Event = entry["cancel_event"]
+        if cancel_ev.is_set() or self._stop_event.is_set():
+            return None
+
+        err_text = str(reason or self.last_error or "").lower()
+        # DM権限拒否などリトライしても解決しない恒久エラーは即時終了
+        if "dm permission restricted" in err_text:
+            return None
+
+        with self._lock:
+            current_entry = self._pending_replies.get(fan_id)
+            if current_entry is not None and current_entry is not entry:
+                return None
+
+            retries = int(entry.get("retry_count") or 0) + 1
+            max_retries = max(1, int(self._max_send_retries))
+            if retries > max_retries:
+                if self._pending_replies.get(fan_id) is entry:
+                    self._pending_replies.pop(fan_id, None)
+                return None
+
+            base_wait = (
+                float(delay_sec)
+                if delay_sec is not None
+                else (0.2 if self.fast_mode else float(self._retry_backoff_base_sec) * retries)
+            )
+            next_ts = time.time() + max(0.05, base_wait)
+            sched_dt = datetime.fromtimestamp(next_ts)
+            entry["retry_count"] = retries
+            entry["typing_done"] = True
+            entry["typing_delay_sec"] = 0.0
+            entry["send_start_ts"] = next_ts
+            entry["scheduled_ts"] = next_ts
+            entry["scheduled_time_hms"] = sched_dt.strftime("%H:%M:%S")
+            entry["scheduled_at_iso"] = sched_dt.strftime("%Y-%m-%dT%H:%M:%S")
+            entry["stage"] = f"retrying_{retries}"
+            self._pending_replies[fan_id] = entry
+
+        self._wake_event.set()
+        logger.warning(
+            f"[{self.char_id}] Scheduled send retry {retries}/{max_retries} for @{fan_id} "
+            f"in {base_wait:.1f}s (reason: {reason})"
+        )
+        return {
+            "ok": False,
+            "action": "retry_scheduled",
+            "retry_count": retries,
+            "next_send_ts": next_ts,
+            "char_id": self.char_id,
+            "fan_id": fan_id,
+            "error": reason,
+        }
+
     def _execute_pending_reply_entry(self, entry: Dict[str, Any], page: Any = None) -> Dict[str, Any]:
         """カウントダウン満了後の自動返信送信・DBコミットを実行する"""
         fan_id = str(entry["fan_id"])
@@ -1151,6 +1367,15 @@ class CharacterBotWorker:
                     self._pending_replies.pop(fan_id, None)
             return {"ok": False, "action": "cancelled_to_manual", "char_id": self.char_id, "fan_id": fan_id}
 
+        with self._lock:
+            if bool(entry.get("committed")):
+                if self._pending_replies.get(fan_id) is entry:
+                    self._pending_replies.pop(fan_id, None)
+                return {"ok": True, "action": "already_committed", "char_id": self.char_id, "fan_id": fan_id}
+            active_cur = self._pending_replies.get(fan_id)
+            if active_cur is not None and active_cur is not entry:
+                return {"ok": False, "action": "superseded", "char_id": self.char_id, "fan_id": fan_id}
+
         fan_now = get_fan_record(self.char_id, fan_id, db_path=db_path) or {}
         if (
             int(fan_now.get("manual_hold") or 0) == 1
@@ -1162,33 +1387,101 @@ class CharacterBotWorker:
                     self._pending_replies.pop(fan_id, None)
             return {"ok": False, "action": "skipped_manual_or_locked", "char_id": self.char_id, "fan_id": fan_id}
 
-        with self._lock:
-            entry["stage"] = "sending_typing"
-
         ai_en = entry["ai_en"]
         ai_ja = entry["ai_ja"]
         next_phase = entry["sales_phase"]
         selected_ppv = entry.get("selected_ppv")
         read_delay = float(entry.get("read_delay_sec") or 0.0)
-        typing_delay = float(entry.get("typing_delay_sec") or 0.0)
+        typing_delay = 0.0 if entry.get("typing_done") else float(entry.get("typing_delay_sec") or 0.0)
 
-        sent_ok = self._send_via_playwright_page(
-            page=page,
-            fan_id=fan_id,
-            message_en=ai_en,
-            typing_delay_sec=typing_delay,
-            selected_ppv=selected_ppv,
-            cancel_event=cancel_ev,
-        )
+        # 実運用モード (fast_mode == False) でブラウザページが未初期化／再起動中／閉鎖中の場合は
+        # サイレントに成功扱いして破棄せず、ブラウザ復旧まで待機リトライとして保持する
+        effective_page = page if page is not None else self._active_page
+        if not self.fast_mode:
+            page_unavailable = effective_page is None
+            if not page_unavailable and hasattr(effective_page, "is_closed") and callable(effective_page.is_closed):
+                try:
+                    page_unavailable = bool(effective_page.is_closed())
+                except Exception:
+                    page_unavailable = True
+            if page_unavailable:
+                retry_res = self._reschedule_pending_reply_retry(
+                    entry,
+                    reason="Playwright browser page is not ready/recovering",
+                )
+                if retry_res is not None:
+                    return retry_res
+                return {
+                    "ok": False,
+                    "action": "send_failed_browser_unavailable",
+                    "char_id": self.char_id,
+                    "fan_id": fan_id,
+                    "error": self.last_error or "Browser page unavailable",
+                }
+
         with self._lock:
-            if self._pending_replies.get(fan_id) is entry:
-                self._pending_replies.pop(fan_id, None)
+            entry["stage"] = "sending_typing"
 
-        if cancel_ev.is_set():
+        already_sent_in_dom = False
+        with self._page_lock:
+            self._in_busy_op = True
+            try:
+                self.touch_heartbeat()
+                if int(entry.get("retry_count") or 0) > 0 and effective_page is not None and not selected_ppv:
+                    if self._verify_message_already_sent_in_dom(effective_page, fan_id, ai_en):
+                        logger.info(
+                            f"[{self.char_id}] Verified previous attempt already delivered DM to @{fan_id}; "
+                            "skipping duplicate click and committing DB"
+                        )
+                        already_sent_in_dom = True
+
+                if already_sent_in_dom:
+                    sent_ok = True
+                else:
+                    sent_ok = self._send_via_playwright_page(
+                        page=effective_page,
+                        fan_id=fan_id,
+                        message_en=ai_en,
+                        typing_delay_sec=typing_delay,
+                        selected_ppv=selected_ppv,
+                        cancel_event=cancel_ev,
+                        retry_count=int(entry.get("retry_count") or 0),
+                    )
+                    if not sent_ok and effective_page is not None and not cancel_ev.is_set() and not selected_ppv:
+                        if self._verify_message_already_sent_in_dom(effective_page, fan_id, ai_en):
+                            logger.info(
+                                f"[{self.char_id}] Post-error check confirmed DM was delivered in DOM for @{fan_id}"
+                            )
+                            sent_ok = True
+            finally:
+                self._in_busy_op = False
+                self.touch_heartbeat()
+
+        if cancel_ev.is_set() or self._stop_event.is_set():
+            with self._lock:
+                if self._pending_replies.get(fan_id) is entry:
+                    self._pending_replies.pop(fan_id, None)
             return {"ok": False, "action": "cancelled_during_typing", "char_id": self.char_id, "fan_id": fan_id}
 
-        if page is not None and not sent_ok:
-            logger.warning(f"[{self.char_id}] Browser send returned False for @{fan_id}; skipping DB ai message commit")
+        if effective_page is not None and not sent_ok:
+            retry_res = self._reschedule_pending_reply_retry(
+                entry,
+                reason=self.last_error or "Playwright send returned False",
+            )
+            if retry_res is not None:
+                return retry_res
+            with self._lock:
+                if self._pending_replies.get(fan_id) is entry:
+                    self._pending_replies.pop(fan_id, None)
+                err_low = str(self.last_error or "").lower()
+                cooldown_sec = 1800.0 if "dm permission restricted" in err_low else (1.0 if self.fast_mode else 90.0)
+                self._unanswered_recheck_after_ts[fan_id] = time.time() + cooldown_sec
+                # 次回クールダウン満了時にスレッド再検査されるよう既読プレビューキャッシュを外す
+                self._checked_read_previews.pop(fan_id, None)
+            logger.warning(
+                f"[{self.char_id}] Browser send failed after retries for @{fan_id}; "
+                f"skipping DB ai message commit (recheck cooldown={cooldown_sec:.0f}s)"
+            )
             return {
                 "ok": False,
                 "action": "send_failed",
@@ -1196,6 +1489,41 @@ class CharacterBotWorker:
                 "fan_id": fan_id,
                 "error": self.last_error,
             }
+
+        with self._lock:
+            if bool(entry.get("committed")):
+                if self._pending_replies.get(fan_id) is entry:
+                    self._pending_replies.pop(fan_id, None)
+                return {"ok": True, "action": "already_committed", "char_id": self.char_id, "fan_id": fan_id}
+            entry["committed"] = True
+            if self._pending_replies.get(fan_id) is entry:
+                self._pending_replies.pop(fan_id, None)
+            self._unanswered_recheck_after_ts.pop(fan_id, None)
+
+        if bool(entry.get("defer_state_commit")):
+            dlog_to_save = entry.get("decision_log")
+            updated_fan = upsert_fan_sales_state(
+                char_id=self.char_id,
+                fan_id=fan_id,
+                username=str(entry.get("username") or fan_id),
+                current_tier=entry.get("detected_tier"),
+                total_spent_usd=entry.get("total_spent_usd"),
+                sales_phase=next_phase,
+                consecutive_unanswered=0,
+                consecutive_ppv_ignored=entry.get("consecutive_ppv_ignored"),
+                is_low_priority=int(entry.get("is_low_priority") or 0),
+                is_escalated=0,
+                escalation_reason=None,
+                psych_profile_dict=entry.get("psych_profile") if isinstance(entry.get("psych_profile"), dict) else None,
+                db_path=db_path,
+            )
+            if isinstance(dlog_to_save, dict):
+                if updated_fan.get("ab_group"):
+                    sr = dlog_to_save.setdefault("strategy_reasoning", {})
+                    ab_rule = sr.setdefault("ab_rule_applied", {})
+                    if isinstance(ab_rule, dict):
+                        ab_rule["ab_group"] = str(updated_fan["ab_group"])
+                append_fan_decision_log(self.char_id, fan_id, dlog_to_save, db_path=db_path)
 
         tip_hook = entry.get("tip_hook") if isinstance(entry.get("tip_hook"), dict) else {}
         tx_id = entry.get("tip_tx_id") or tip_hook.get("tx_id")
@@ -1308,7 +1636,7 @@ class CharacterBotWorker:
             current_handle = page.evaluate(
                 """() => {
                     const a = document.querySelector('.message-content-header app-account-username a.username-wrapper, .message-content-header-avatar a[href^="/"]');
-                    return a ? (a.getAttribute('href') || '').replace(/^\\/+/, '').trim() : '';
+                    return a ? (a.getAttribute('href') || '').replace(/^\\/+/, '').split(/[/?#]/)[0].trim() : '';
                 }"""
             )
             if current_handle and current_handle.lower() == fan_id.lower():
@@ -1323,24 +1651,37 @@ class CharacterBotWorker:
 
             if group_href:
                 target_url = f"https://fansly.com{group_href}" if group_href.startswith("/") else group_href
+                expected_gid = group_href.replace("/messages/", "").split("?")[0].split("#")[0].strip("/")
+                cur_url = str(getattr(page, "url", "") or "")
+                if expected_gid and f"/messages/{expected_gid}" in cur_url:
+                    return True
                 logger.info(f"[{self.char_id}] Navigating to thread for @{fan_id}: {target_url}")
                 page.goto(target_url, wait_until="domcontentloaded", timeout=20000)
-                page.wait_for_selector("app-messages-conversation-route, app-group-message-input", timeout=12000)
-                page.wait_for_timeout(1000)
+                if hasattr(page, "wait_for_selector"):
+                    page.wait_for_selector("app-messages-conversation-route, app-group-message-input", timeout=15000)
+                if hasattr(page, "wait_for_timeout"):
+                    page.wait_for_timeout(1000)
                 return True
 
             if "fansly.com/messages" not in str(getattr(page, "url", "") or ""):
                 page.goto(FANSLY_MESSAGES_URL, wait_until="domcontentloaded", timeout=20000)
-                page.wait_for_timeout(2000)
+                self._wait_for_messages_spa_ready(page)
+            elif hasattr(page, "wait_for_selector"):
+                try:
+                    page.wait_for_selector("app-messaging-group", timeout=6000)
+                except Exception:
+                    pass
 
             clicked_href = page.evaluate(
                 """(targetFanId) => {
+                    const targetLower = String(targetFanId || '').toLowerCase();
                     const anchors = Array.from(document.querySelectorAll('.message-list a[href^="/messages/"]'));
                     for (const a of anchors) {
+                        const href = a.getAttribute('href') || '';
+                        const gid = href.replace(/^\\/messages\\//, '').split(/[?#]/)[0].trim().toLowerCase();
                         const u = a.querySelector('app-account-username a.username-wrapper, app-account-avatar a[href^="/"]');
-                        const handle = u ? (u.getAttribute('href') || '').replace(/^\\/+/, '').trim() : '';
-                        if (handle && handle.toLowerCase() === targetFanId.toLowerCase()) {
-                            const href = a.getAttribute('href') || '';
+                        const handle = u ? (u.getAttribute('href') || '').replace(/^\\/+/, '').split(/[/?#]/)[0].trim().toLowerCase() : '';
+                        if ((handle && handle === targetLower) || (gid && gid === targetLower)) {
                             const clickEl = a.querySelector('.eclipse') || a.querySelector('.message-time') || a;
                             clickEl.click();
                             return href;
@@ -1352,8 +1693,10 @@ class CharacterBotWorker:
             )
             if clicked_href:
                 self._fan_group_hrefs[fan_id] = clicked_href
-                page.wait_for_selector("app-messages-conversation-route, app-group-message-input", timeout=12000)
-                page.wait_for_timeout(1000)
+                if hasattr(page, "wait_for_selector"):
+                    page.wait_for_selector("app-messages-conversation-route, app-group-message-input", timeout=15000)
+                if hasattr(page, "wait_for_timeout"):
+                    page.wait_for_timeout(1000)
                 return True
 
             logger.warning(f"[{self.char_id}] Could not find thread in message list for @{fan_id}")
@@ -1394,6 +1737,176 @@ class CharacterBotWorker:
                 return os.path.abspath(resolved)
         return None
 
+    def _cleanup_lingering_modals(self, page: Any, clear_composer_attachments: bool = False) -> None:
+        """
+        前回試行のタイムアウトや中断で残存しているサブモーダル・メインアップロードモーダル
+        (app-media-editor / app-balance-input-modal / app-account-media-upload-v2 / .xdModal.back-drop)
+        を内側から順に安全に閉じ、次回リトライや巡回が遮蔽されないクリーンな状態に戻す。
+        """
+        if page is None or not hasattr(page, "evaluate"):
+            return
+        try:
+            for _ in range(4):
+                modal_state = page.evaluate(
+                    """() => {
+                        const clickFirst = (selectors) => {
+                            for (const sel of selectors) {
+                                const el = document.querySelector(sel);
+                                if (el && (el.offsetParent !== null || getComputedStyle(el).display !== 'none')) {
+                                    el.click();
+                                    return sel;
+                                }
+                            }
+                            return '';
+                        };
+                        if (document.querySelector('app-media-editor')) {
+                            return clickFirst([
+                                'app-media-editor .modal-footer button.btn.v2.text',
+                                'app-media-editor .editor-top button[aria-label="Close"]',
+                                'app-media-editor button[aria-label="Close"]'
+                            ]) || 'escape_editor';
+                        }
+                        if (document.querySelector('app-balance-input-modal')) {
+                            return clickFirst([
+                                'app-balance-input-modal .modal-footer button.btn.v2.text',
+                                'app-balance-input-modal button[aria-label="Close"]',
+                                'app-balance-input-modal .close'
+                            ]) || 'escape_balance';
+                        }
+                        if (document.querySelector('app-account-media-upload-v2')) {
+                            return clickFirst([
+                                'app-account-media-upload-v2 .modal-footer button.btn.v2.text',
+                                'app-account-media-upload-v2 .upload-top button[aria-label="Close"]',
+                                'app-account-media-upload-v2 button[aria-label="Close"]'
+                            ]) || 'escape_upload';
+                        }
+                        return '';
+                    }"""
+                )
+                if not modal_state:
+                    break
+                if modal_state.startswith("escape_") and hasattr(page, "keyboard"):
+                    try:
+                        page.keyboard.press("Escape")
+                    except Exception:
+                        pass
+                if hasattr(page, "wait_for_timeout"):
+                    page.wait_for_timeout(450)
+
+            if clear_composer_attachments:
+                page.evaluate(
+                    """() => {
+                        const rmBtns = Array.from(
+                            document.querySelectorAll(
+                                'app-group-message-input button[aria-label*="Remove" i], ' +
+                                'app-group-message-input .attachment-remove, ' +
+                                'app-group-message-input .remove-attachment'
+                            )
+                        );
+                        for (const b of rmBtns) {
+                            try { b.click(); } catch (e) {}
+                        }
+                    }"""
+                )
+                if hasattr(page, "wait_for_timeout"):
+                    page.wait_for_timeout(250)
+        except Exception as clean_err:
+            logger.debug(f"[{self.char_id}] _cleanup_lingering_modals info: {clean_err}")
+
+    def _confirm_or_close_media_editor_modal(self, page: Any, media_basename: str = "") -> bool:
+        """
+        Fansly にてプレビュー用静止画をアップロードした直後に自動で開く画像エディタモーダル
+        (app-media-editor: 'Edit image') を検知し、キャンバス初期化完了後に 'Done' ボタンを
+        クリックして確定クローズする。
+        これが開いたままだと背後の app-account-media-upload-v2 が .inactive-modal となり、
+        .xdModal.back-drop / .spinner が Attach ボタンへのクリックを遮蔽するため必須。
+        """
+        if page is None or not hasattr(page, "wait_for_selector"):
+            return False
+
+        editor_appeared = False
+        try:
+            page.wait_for_selector("app-media-editor, .modal.image-editor", timeout=3500)
+            editor_appeared = True
+        except Exception:
+            editor_appeared = _query_first(page, FANSLY_SELECTORS["media_editor_modal"]) is not None
+
+        if not editor_appeared:
+            return False
+
+        logger.info(f"[{self.char_id}] Media editor modal detected for {media_basename}; waiting for canvas & clicking Done...")
+        # Fabric キャンバス初期化スピナーが消えるか Done ボタンが有効化されるまで待機（最大6秒）
+        if hasattr(page, "evaluate"):
+            for _ in range(20):
+                try:
+                    ready = page.evaluate(
+                        """() => {
+                            const ed = document.querySelector('app-media-editor');
+                            if (!ed) return true;
+                            const doneBtn = ed.querySelector('.modal-footer button.solid-blue, button.solid-blue');
+                            if (!doneBtn || doneBtn.hasAttribute('disabled')) return false;
+                            const sp = ed.querySelector('.canvas-wrapper .spinner');
+                            const spVisible = sp && sp.offsetParent !== null && getComputedStyle(sp).display !== 'none' && getComputedStyle(sp).visibility !== 'hidden' && parseFloat(getComputedStyle(sp).opacity || '1') > 0.05;
+                            const hasCanvas = !!ed.querySelector('canvas.upper-canvas, canvas.lower-canvas, canvas');
+                            return hasCanvas || !spVisible;
+                        }"""
+                    )
+                    if ready:
+                        break
+                except Exception:
+                    break
+                page.wait_for_timeout(300)
+
+        page.wait_for_timeout(350)
+        clicked_done = False
+        if hasattr(page, "locator"):
+            done_loc = page.locator(", ".join(FANSLY_SELECTORS["media_editor_done"])).locator("visible=true").first
+            if done_loc.count() > 0:
+                try:
+                    done_loc.click(timeout=6000)
+                    clicked_done = True
+                except Exception:
+                    clicked_done = False
+
+        if not clicked_done and hasattr(page, "evaluate"):
+            clicked_done = bool(
+                page.evaluate(
+                    """() => {
+                        const ed = document.querySelector('app-media-editor');
+                        if (!ed) return true;
+                        const btns = Array.from(ed.querySelectorAll('.modal-footer button.solid-blue, button.solid-blue, .modal-footer button'));
+                        const target = btns.find(b => /done|save|apply|完了|保存/i.test((b.innerText || b.textContent || '').trim())) || btns[0];
+                        if (target && !target.hasAttribute('disabled')) {
+                            target.click();
+                            return true;
+                        }
+                        return false;
+                    }"""
+                )
+            )
+
+        try:
+            page.wait_for_selector("app-media-editor", state="detached", timeout=10000)
+        except Exception:
+            logger.warning(f"[{self.char_id}] app-media-editor did not detach after Done; cancelling editor overlay to unblock Attach")
+            if hasattr(page, "evaluate"):
+                page.evaluate(
+                    """() => {
+                        const cancelBtn = document.querySelector(
+                            'app-media-editor .modal-footer button.btn.v2.text, app-media-editor .editor-top button[aria-label="Close"]'
+                        );
+                        if (cancelBtn) cancelBtn.click();
+                    }"""
+                )
+            try:
+                page.wait_for_selector("app-media-editor", state="detached", timeout=5000)
+            except Exception:
+                pass
+            return False
+
+        page.wait_for_timeout(450)
+        return True
+
     def _attach_blur_preview_in_upload_modal(
         self,
         page: Any,
@@ -1419,6 +1932,9 @@ class CharacterBotWorker:
             prev_inp = _query_first(page, FANSLY_SELECTORS["upload_preview_file_input"])
             if prev_inp is not None and hasattr(prev_inp, "set_input_files"):
                 prev_inp.set_input_files(blur_preview_path)
+                editor_done_mock = _query_first(page, FANSLY_SELECTORS["media_editor_done"])
+                if editor_done_mock is not None and hasattr(editor_done_mock, "click"):
+                    editor_done_mock.click()
                 logger.info(
                     f"[{self.char_id}] Attached blurred preview (mock) for {media_basename}: {blur_basename}"
                 )
@@ -1528,15 +2044,21 @@ class CharacterBotWorker:
                 )
                 return False
 
+            # 3.5. 静止画プレビュー選択時に自動起動する Edit image サブモーダル (app-media-editor) を確定クローズする
+            self._confirm_or_close_media_editor_modal(page, media_basename=media_basename)
+
             # 4. ぼかしプレビューのアップロード反映・紐付け完了をDOM上で確認（画像PPV・動画PPV共通）
             preview_confirmed = False
             if hasattr(page, "evaluate"):
                 for _ in range(24):
+                    if _query_first(page, FANSLY_SELECTORS["media_editor_modal"]) is not None:
+                        self._confirm_or_close_media_editor_modal(page, media_basename=media_basename)
                     page.wait_for_timeout(500)
                     dom_st = page.evaluate(
                         r"""() => {
+                            if (document.querySelector('app-media-editor')) return { ready: false };
                             const modal = document.querySelector('app-account-media-upload-v2, .modal.upload-v2');
-                            if (!modal) return { ready: false };
+                            if (!modal || modal.classList.contains('inactive-modal')) return { ready: false };
                             const hasSpinner = !!modal.querySelector('.fa-spinner, .fa-spin, mat-spinner');
                             const hasOkBadge = !!modal.querySelector(
                                 '.fansly-media-badge.ok, app-icon[name="eye"], i.fa-eye:not(.fa-eye-slash)'
@@ -1545,10 +2067,8 @@ class CharacterBotWorker:
                             const actionsEl = modal.querySelector('.upload-stage-actions');
                             const actionsTxt = actionsEl ? (actionsEl.innerText || actionsEl.textContent || '') : '';
                             const hasRemoveTxt = /remove\s+preview|プレビューを削除/i.test(actionsTxt);
-                            const stageBadge = modal.querySelector('.upload-stage-badge');
-                            const addBtnGone = !stageBadge || stageBadge.offsetParent === null;
                             return {
-                                ready: !hasSpinner && (hasOkBadge || hasSwitch || hasRemoveTxt || addBtnGone)
+                                ready: !hasSpinner && (hasOkBadge || hasSwitch || hasRemoveTxt)
                             };
                         }"""
                     )
@@ -1563,12 +2083,18 @@ class CharacterBotWorker:
                 f"[{self.char_id}] Blurred preview attached for {media_basename}: {blur_basename} "
                 f"(confirmed={preview_confirmed})"
             )
-            return True
+            return preview_confirmed
         except Exception as prev_err:
             logger.warning(
                 f"[{self.char_id}] Blurred preview attach warning for {media_basename} ({prev_err}); "
                 "falling back to standard PPV attach"
             )
+            if hasattr(page, "wait_for_selector"):
+                try:
+                    if _query_first(page, FANSLY_SELECTORS["media_editor_modal"]) is not None:
+                        self._confirm_or_close_media_editor_modal(page, media_basename=media_basename)
+                except Exception:
+                    pass
             return False
 
     def _attach_ppv_with_price_modal(
@@ -1578,12 +2104,16 @@ class CharacterBotWorker:
         offered_price: float,
         blur_preview_path: Optional[str] = None,
         selected_ppv: Optional[Dict[str, Any]] = None,
+        skip_blur_preview: bool = False,
     ) -> bool:
         """
         Fansly Media Upload v2 + Set price モーダルでローカルPPVメディア（画像・動画）の添付、
         価格ロック設定、およびぼかしプレビュー画像の自動アップロード・紐付けを行う。
-        ぼかしプレビュー画像が存在しない場合は従来フローへ安全にフォールバックする。
+        ぼかしプレビュー画像が存在しない場合や skip_blur_preview=True 時は従来フローへ安全にフォールバックする。
         """
+        # 前回リトライ等で残存しているモーダルがあれば事前に完全消去する
+        self._cleanup_lingering_modals(page, clear_composer_attachments=True)
+
         file_input = _query_first(page, FANSLY_SELECTORS["file_input"])
         if file_input is None and hasattr(page, "wait_for_selector"):
             try:
@@ -1600,11 +2130,13 @@ class CharacterBotWorker:
             logger.warning(f"[{self.char_id}] PPV file_input DOM not found for {media_path}")
             return False
 
-        effective_blur_path = (
-            os.path.abspath(blur_preview_path)
-            if (blur_preview_path and os.path.isfile(blur_preview_path) and os.path.getsize(blur_preview_path) > 0)
-            else self.resolve_ppv_blur_preview_path(media_path, selected_ppv=selected_ppv)
-        )
+        effective_blur_path = None
+        if not skip_blur_preview:
+            effective_blur_path = (
+                os.path.abspath(blur_preview_path)
+                if (blur_preview_path and os.path.isfile(blur_preview_path) and os.path.getsize(blur_preview_path) > 0)
+                else self.resolve_ppv_blur_preview_path(media_path, selected_ppv=selected_ppv)
+            )
 
         logger.info(
             f"[{self.char_id}] Uploading PPV media: {os.path.basename(media_path)} (${offered_price:.2f}, "
@@ -1622,96 +2154,111 @@ class CharacterBotWorker:
                 confirm_btn = _query_first(page, FANSLY_SELECTORS["ppv_price_confirm"])
                 if confirm_btn is not None:
                     confirm_btn.click()
+            blur_ok_mock = False
             if effective_blur_path:
-                self._attach_blur_preview_in_upload_modal(page, media_path, effective_blur_path)
+                blur_ok_mock = self._attach_blur_preview_in_upload_modal(page, media_path, effective_blur_path)
             attach_btn_mock = _query_first(page, FANSLY_SELECTORS["upload_attach_confirm"])
             if attach_btn_mock is not None and hasattr(attach_btn_mock, "click"):
                 attach_btn_mock.click()
             return True
 
-        page.wait_for_selector("app-account-media-upload-v2", timeout=15000)
-        page.wait_for_timeout(1000)
+        try:
+            page.wait_for_selector("app-account-media-upload-v2", timeout=15000)
+            page.wait_for_timeout(1000)
 
-        if offered_price > 0:
-            for rm_btn in page.query_selector_all("app-permission-rows-editor button.perm-cond-remove"):
+            if offered_price > 0:
+                for rm_btn in page.query_selector_all("app-permission-rows-editor button.perm-cond-remove"):
+                    try:
+                        rm_btn.click()
+                        page.wait_for_timeout(250)
+                    except Exception:
+                        pass
+
+                add_chip = _query_first(page, FANSLY_SELECTORS["upload_perm_add_chip"])
+                if add_chip is not None:
+                    add_chip.click()
+                    page.wait_for_timeout(400)
+
+                clicked_pay = page.evaluate(
+                    """() => {
+                        const items = Array.from(document.querySelectorAll('app-permission-rows-editor .dropdown-item'));
+                        const payItem = items.find(el => (el.textContent || '').trim().toLowerCase() === 'pay');
+                        if (payItem) { payItem.click(); return true; }
+                        return false;
+                    }"""
+                )
+                if not clicked_pay:
+                    logger.warning(f"[{self.char_id}] 'Pay' option not found in app-permission-rows-editor")
+                    self._cleanup_lingering_modals(page, clear_composer_attachments=True)
+                    return False
+
+                page.wait_for_selector("app-balance-input-modal", timeout=10000)
+                page.wait_for_timeout(400)
+                price_input = _query_first(page, FANSLY_SELECTORS["ppv_price_input"])
+                if price_input is None:
+                    logger.warning(f"[{self.char_id}] Price input not found in app-balance-input-modal")
+                    self._cleanup_lingering_modals(page, clear_composer_attachments=True)
+                    return False
+
+                price_input.fill(f"{offered_price:.2f}")
                 try:
-                    rm_btn.click()
-                    page.wait_for_timeout(250)
+                    price_input.dispatch_event("input")
+                    price_input.dispatch_event("change")
                 except Exception:
                     pass
+                page.wait_for_timeout(300)
 
-            add_chip = _query_first(page, FANSLY_SELECTORS["upload_perm_add_chip"])
-            if add_chip is not None:
-                add_chip.click()
+                confirm_btn = _query_first(page, FANSLY_SELECTORS["ppv_price_confirm"])
+                if confirm_btn is not None:
+                    confirm_btn.click()
+                else:
+                    page.keyboard.press("Enter")
+                page.wait_for_selector("app-balance-input-modal", state="detached", timeout=8000)
+                page.wait_for_timeout(500)
+
+            blur_attached_ok = False
+            if effective_blur_path:
+                blur_attached_ok = self._attach_blur_preview_in_upload_modal(page, media_path, effective_blur_path)
                 page.wait_for_timeout(400)
+            else:
+                logger.info(
+                    f"[{self.char_id}] No blurred preview used for {os.path.basename(media_path)}; "
+                    "proceeding with standard PPV attach flow"
+                )
 
-            clicked_pay = page.evaluate(
-                """() => {
-                    const items = Array.from(document.querySelectorAll('app-permission-rows-editor .dropdown-item'));
-                    const payItem = items.find(el => (el.textContent || '').trim().toLowerCase() === 'pay');
-                    if (payItem) { payItem.click(); return true; }
-                    return false;
-                }"""
-            )
-            if not clicked_pay:
-                logger.warning(f"[{self.char_id}] 'Pay' option not found in app-permission-rows-editor")
-                return False
+            # Attach クリック前にサブモーダル (app-media-editor / app-balance-input-modal) が残っていないか最終保証
+            if _query_first(page, FANSLY_SELECTORS["media_editor_modal"]) is not None:
+                self._confirm_or_close_media_editor_modal(page, media_basename=os.path.basename(media_path))
 
-            page.wait_for_selector("app-balance-input-modal", timeout=10000)
-            page.wait_for_timeout(400)
-            price_input = _query_first(page, FANSLY_SELECTORS["ppv_price_input"])
-            if price_input is None:
-                logger.warning(f"[{self.char_id}] Price input not found in app-balance-input-modal")
-                return False
-
-            price_input.fill(f"{offered_price:.2f}")
             try:
-                price_input.dispatch_event("input")
-                price_input.dispatch_event("change")
+                page.wait_for_selector(
+                    "app-account-media-upload-v2:not(.inactive-modal) .modal-footer button.upload-primary:not([disabled]), "
+                    "app-account-media-upload-v2 .modal-footer button.upload-primary:not([disabled])",
+                    timeout=20000,
+                )
             except Exception:
                 pass
-            page.wait_for_timeout(300)
 
-            confirm_btn = _query_first(page, FANSLY_SELECTORS["ppv_price_confirm"])
-            if confirm_btn is not None:
-                confirm_btn.click()
-            else:
-                page.keyboard.press("Enter")
-            page.wait_for_selector("app-balance-input-modal", state="detached", timeout=8000)
-            page.wait_for_timeout(500)
+            attach_btn = _query_first(page, FANSLY_SELECTORS["upload_attach_confirm"])
+            if attach_btn is None:
+                logger.warning(f"[{self.char_id}] Attach button (button.upload-primary) not found")
+                self._cleanup_lingering_modals(page, clear_composer_attachments=True)
+                return False
 
-        # TICKET-06: ぼかしプレビュー画像が存在する場合はプレビュー枠へ自動アップロード・紐付け（無い場合はそのまま従来フローへフォールバック）
-        if effective_blur_path:
-            self._attach_blur_preview_in_upload_modal(page, media_path, effective_blur_path)
-            page.wait_for_timeout(400)
-        else:
+            attach_btn.click()
+            page.wait_for_selector("app-account-media-upload-v2", state="detached", timeout=60000)
+            page.wait_for_timeout(800)
             logger.info(
-                f"[{self.char_id}] No blurred preview found for {os.path.basename(media_path)}; "
-                "proceeding with standard PPV attach flow"
+                f"[{self.char_id}] PPV media attached OK (${offered_price:.2f}, "
+                f"blur_preview_attached={blur_attached_ok})"
             )
-
-        try:
-            page.wait_for_selector(
-                "app-account-media-upload-v2 .modal-footer button.upload-primary:not([disabled]), "
-                "button.upload-primary:not([disabled])",
-                timeout=15000,
+            return True
+        except Exception as attach_err:
+            logger.warning(
+                f"[{self.char_id}] PPV modal attach error for {os.path.basename(media_path)}: {attach_err}"
             )
-        except Exception:
-            pass
-
-        attach_btn = _query_first(page, FANSLY_SELECTORS["upload_attach_confirm"])
-        if attach_btn is None:
-            logger.warning(f"[{self.char_id}] Attach button (button.upload-primary) not found")
-            return False
-
-        attach_btn.click()
-        page.wait_for_selector("app-account-media-upload-v2", state="detached", timeout=45000)
-        page.wait_for_timeout(800)
-        logger.info(
-            f"[{self.char_id}] PPV media attached OK (${offered_price:.2f}, "
-            f"blur_preview_attached={bool(effective_blur_path)})"
-        )
-        return True
+            self._cleanup_lingering_modals(page, clear_composer_attachments=True)
+            raise
 
     def _fill_chat_input_preserving_newlines(
         self,
@@ -1829,6 +2376,7 @@ class CharacterBotWorker:
         typing_delay_sec: float = 0.0,
         selected_ppv: Optional[Dict[str, Any]] = None,
         cancel_event: Optional[threading.Event] = None,
+        retry_count: int = 0,
     ) -> bool:
         """
         Playwrightのページオブジェクトが存在する場合、
@@ -1843,6 +2391,9 @@ class CharacterBotWorker:
         norm_message_en = normalize_dm_message_text(message_en)
 
         try:
+            # 前回失敗時のモーダルオーバーレイが残存していれば先に閉じておく
+            self._cleanup_lingering_modals(page, clear_composer_attachments=False)
+
             if not self._ensure_fan_conversation_open(page, fan_id):
                 self.last_error = f"Target thread not found for @{fan_id}"
                 return False
@@ -1870,21 +2421,37 @@ class CharacterBotWorker:
                 if filename:
                     media_path = os.path.join(self.vault_dir, filename)
                     if os.path.isfile(media_path):
+                        # リトライ後半 (retry_count >= 2) はぼかしプレビュー起因のDOM異常を回避するため標準ロックPPV添付へ安全フォールバック
+                        skip_blur = int(retry_count or 0) >= 2
                         if not self._attach_ppv_with_price_modal(
                             page=page,
                             media_path=media_path,
                             offered_price=offered_price,
                             selected_ppv=selected_ppv,
+                            skip_blur_preview=skip_blur,
                         ):
                             logger.warning(f"[{self.char_id}] PPV attach failed for {filename}; aborting send")
+                            self._cleanup_lingering_modals(page, clear_composer_attachments=True)
                             return False
                         attached_ppv_ok = True
                     else:
                         logger.warning(f"[{self.char_id}] Local PPV media file not found: {media_path}")
 
             chat_input = _query_first(page, FANSLY_SELECTORS["chat_input"])
+            if chat_input is None and hasattr(page, "wait_for_selector"):
+                try:
+                    page.wait_for_selector(
+                        "app-group-message-input .message-composer:not(.hidden) textarea.message-input, "
+                        "textarea.message-input",
+                        timeout=8000,
+                    )
+                    chat_input = _query_first(page, FANSLY_SELECTORS["chat_input"])
+                except Exception:
+                    chat_input = _query_first(page, FANSLY_SELECTORS["chat_input"])
             if chat_input is None:
-                logger.warning(f"[{self.char_id}] Chat input selector not found on page (fan=@{fan_id})")
+                msg = f"Chat input selector not found on page (fan=@{fan_id})"
+                logger.warning(f"[{self.char_id}] {msg}")
+                self.last_error = msg
                 return False
 
             chat_input.click()
@@ -1905,16 +2472,17 @@ class CharacterBotWorker:
             if hasattr(page, "wait_for_timeout"):
                 page.wait_for_timeout(400)
 
-            if attached_ppv_ok and hasattr(page, "wait_for_selector"):
+            if hasattr(page, "wait_for_selector"):
                 try:
                     page.wait_for_selector(
                         "app-group-message-input button.send-button:not([disabled])",
-                        timeout=20000,
+                        timeout=20000 if attached_ppv_ok else 5000,
                     )
                 except Exception:
                     pass
 
-            send_btn = _query_first(page, FANSLY_SELECTORS["send_button"])
+            enabled_send_btn = _query_first(page, ["app-group-message-input button.send-button:not([disabled])"])
+            send_btn = enabled_send_btn or _query_first(page, FANSLY_SELECTORS["send_button"])
             if send_btn is not None:
                 send_btn.click()
             else:
@@ -1922,12 +2490,43 @@ class CharacterBotWorker:
 
             if hasattr(page, "wait_for_timeout"):
                 page.wait_for_timeout(1500)
+
+            # 実ブラウザ環境では送信後にチャット入力欄がクリアされたか確認し、残っていれば有効化された送信ボタンを再試行
+            if norm_message_en and hasattr(page, "evaluate"):
+                try:
+                    still_in_box = page.evaluate(
+                        """() => {
+                            const ta = document.querySelector('app-group-message-input textarea.message-input, textarea.message-input');
+                            return ta ? String(ta.value || '').trim().length > 0 : false;
+                        }"""
+                    )
+                    if still_in_box:
+                        retry_btn = _query_first(page, ["app-group-message-input button.send-button:not([disabled])"])
+                        if retry_btn is not None:
+                            retry_btn.click()
+                            if hasattr(page, "wait_for_timeout"):
+                                page.wait_for_timeout(1200)
+                        still_after = page.evaluate(
+                            """() => {
+                                const ta = document.querySelector('app-group-message-input textarea.message-input, textarea.message-input');
+                                return ta ? String(ta.value || '').trim().length > 0 : false;
+                            }"""
+                        )
+                        if still_after and not self._verify_message_already_sent_in_dom(page, fan_id, norm_message_en):
+                            msg = f"Message remained unsent in composer for @{fan_id} (send button disabled or network lag)"
+                            logger.warning(f"[{self.char_id}] {msg}")
+                            self.last_error = msg
+                            return False
+                except Exception:
+                    pass
+
             logger.info(f"[{self.char_id}] Sent DM to @{fan_id}: '{norm_message_en[:80]}'")
             return True
         except Exception as e:
             err_msg = f"Playwright send failed for fan={fan_id}: {e}"
             logger.error(f"[{self.char_id}] {err_msg}")
             self.last_error = err_msg
+            self._cleanup_lingering_modals(page, clear_composer_attachments=bool(selected_ppv))
             return False
 
     def _drain_outbox_queue(self, page: Any = None, now_dt: Optional[datetime] = None) -> int:
@@ -1938,9 +2537,11 @@ class CharacterBotWorker:
         """
         sleeping, _ = self.is_sleeping(now_dt=now_dt)
         bot_enabled = bool(load_settings(self.char_id).get("bot_enabled", False))
+        effective_page = page if page is not None else self._active_page
 
         drained = 0
         deferred_items: List[Dict[str, Any]] = []
+        now_ts = time.time()
         while not self._outbox_queue.empty() and not self._stop_event.is_set():
             try:
                 item = self._outbox_queue.get_nowait()
@@ -1954,7 +2555,44 @@ class CharacterBotWorker:
                 self._outbox_queue.task_done()
                 continue
 
+            next_attempt_ts = float(item.get("next_attempt_ts") or 0.0)
+            if next_attempt_ts > now_ts:
+                deferred_items.append(item)
+                self._outbox_queue.task_done()
+                continue
+
             fan_id = str(item.get("fan_id") or "").strip()
+            # 同一ファンに対するAI自動返信カウントダウン中／送信中は自動追撃キューをぶつけず後回しにする
+            if not is_manual and fan_id:
+                with self._lock:
+                    pend = self._pending_replies.get(fan_id)
+                    has_active_pend = pend is not None and not pend["cancel_event"].is_set()
+                if has_active_pend:
+                    item["next_attempt_ts"] = time.time() + (0.2 if self.fast_mode else 15.0)
+                    deferred_items.append(item)
+                    self._outbox_queue.task_done()
+                    continue
+
+            if not self.fast_mode:
+                page_unavailable = effective_page is None
+                if not page_unavailable and hasattr(effective_page, "is_closed") and callable(effective_page.is_closed):
+                    try:
+                        page_unavailable = bool(effective_page.is_closed())
+                    except Exception:
+                        page_unavailable = True
+                if page_unavailable:
+                    retries = int(item.get("retry_count") or 0) + 1
+                    if retries <= max(1, int(self._max_send_retries)):
+                        item["retry_count"] = retries
+                        item["next_attempt_ts"] = time.time() + (0.2 if self.fast_mode else 8.0 * retries)
+                        deferred_items.append(item)
+                    else:
+                        logger.warning(
+                            f"[{self.char_id}] Dropping outbox item ({source}) for @{fan_id}: browser unavailable after retries"
+                        )
+                    self._outbox_queue.task_done()
+                    continue
+
             msg_en = str(item.get("message_en") or "").strip()
             raw_ppv = item.get("ppv_item") if isinstance(item.get("ppv_item"), dict) else None
             ppv_item = None
@@ -1966,19 +2604,47 @@ class CharacterBotWorker:
                     except Exception:
                         pass
             if fan_id and (msg_en or ppv_item):
+                retries_so_far = int(item.get("retry_count") or 0)
                 logger.info(
-                    f"[{self.char_id}] Draining outbox ({source}) -> @{fan_id}: '{msg_en[:60]}'"
+                    f"[{self.char_id}] Draining outbox ({source}, retry={retries_so_far}) -> @{fan_id}: '{msg_en[:60]}'"
                 )
-                typing_delay = 1.5 if is_manual else calculate_human_delays(msg_en, fast_mode=self.fast_mode)[1]
-                if self.fast_mode:
-                    typing_delay = 0.0
-                sent_ok = self._send_via_playwright_page(
-                    page=page,
-                    fan_id=fan_id,
-                    message_en=msg_en,
-                    typing_delay_sec=typing_delay,
-                    selected_ppv=ppv_item,
+                typing_delay = (
+                    0.0
+                    if (self.fast_mode or retries_so_far > 0)
+                    else (1.5 if is_manual else calculate_human_delays(msg_en, fast_mode=self.fast_mode)[1])
                 )
+                with self._page_lock:
+                    self._in_busy_op = True
+                    try:
+                        self.touch_heartbeat()
+                        if retries_so_far > 0 and effective_page is not None and not ppv_item and msg_en:
+                            if self._verify_message_already_sent_in_dom(effective_page, fan_id, msg_en):
+                                sent_ok = True
+                            else:
+                                sent_ok = self._send_via_playwright_page(
+                                    page=effective_page,
+                                    fan_id=fan_id,
+                                    message_en=msg_en,
+                                    typing_delay_sec=typing_delay,
+                                    selected_ppv=ppv_item,
+                                    retry_count=retries_so_far,
+                                )
+                        else:
+                            sent_ok = self._send_via_playwright_page(
+                                page=effective_page,
+                                fan_id=fan_id,
+                                message_en=msg_en,
+                                typing_delay_sec=typing_delay,
+                                selected_ppv=ppv_item,
+                                retry_count=retries_so_far,
+                            )
+                        if not sent_ok and effective_page is not None and not ppv_item and msg_en:
+                            if self._verify_message_already_sent_in_dom(effective_page, fan_id, msg_en):
+                                sent_ok = True
+                    finally:
+                        self._in_busy_op = False
+                        self.touch_heartbeat()
+
                 with self._lock:
                     self.sent_history.append(
                         {
@@ -1987,20 +2653,35 @@ class CharacterBotWorker:
                             "ai_ja": item.get("message_ja"),
                             "selected_ppv": ppv_item,
                             "source": source,
+                            "retry_count": retries_so_far,
                             "sent_ok": sent_ok,
                         }
                     )
                 if sent_ok:
                     drained += 1
+                elif effective_page is not None:
+                    err_low = str(self.last_error or "").lower()
+                    next_retry = retries_so_far + 1
+                    if "dm permission restricted" not in err_low and next_retry <= max(1, int(self._max_send_retries)):
+                        item["retry_count"] = next_retry
+                        item["next_attempt_ts"] = time.time() + (
+                            0.2 if self.fast_mode else float(self._retry_backoff_base_sec) * next_retry
+                        )
+                        deferred_items.append(item)
+                        logger.warning(
+                            f"[{self.char_id}] Re-queued outbox ({source}) for @{fan_id} "
+                            f"(retry {next_retry}/{self._max_send_retries})"
+                        )
             self._outbox_queue.task_done()
 
         for d_item in deferred_items:
             self._outbox_queue.put(d_item)
 
-        if drained > 0 and page is not None and hasattr(page, "goto") and not self._stop_event.is_set():
+        if drained > 0 and effective_page is not None and hasattr(effective_page, "goto") and not self._stop_event.is_set():
             try:
-                if str(getattr(page, "url", "") or "").rstrip("/") != FANSLY_MESSAGES_URL:
-                    page.goto(FANSLY_MESSAGES_URL, wait_until="domcontentloaded", timeout=20000)
+                with self._page_lock:
+                    if str(getattr(effective_page, "url", "") or "").rstrip("/") != FANSLY_MESSAGES_URL:
+                        effective_page.goto(FANSLY_MESSAGES_URL, wait_until="domcontentloaded", timeout=20000)
             except Exception:
                 pass
         return drained
@@ -2202,6 +2883,54 @@ class CharacterBotWorker:
             handled_mock += 1
         return handled_mock
 
+    def _get_actionable_unanswered_fan_ids(self, max_age_hours: float = 24.0) -> set:
+        """
+        稼働スイッチON (bot_enabled == True) 時に、DB上で最新メッセージがファン送信 (has_unanswered_fan) のまま
+        未返信で残っている対象ファンID集合を返す（クラッシュ再起動後・一時送信失敗後・OFF→ON切替直後の取りこぼし救済用）。
+        """
+        if not bool(load_settings(self.char_id).get("bot_enabled", False)):
+            return set()
+        now_ts = time.time()
+        now_local = datetime.now()
+        result: set = set()
+        try:
+            threads = get_fan_threads(self.char_id, include_muted=False)
+            for th in threads:
+                if not th.get("has_unanswered_fan"):
+                    continue
+                if (
+                    int(th.get("is_muted") or 0) == 1
+                    or int(th.get("is_escalated") or 0) == 1
+                    or int(th.get("manual_hold") or 0) == 1
+                ):
+                    continue
+                fid = str(th.get("fan_id") or "").strip()
+                if not fid:
+                    continue
+                with self._lock:
+                    pend = self._pending_replies.get(fid)
+                    if pend is not None and not pend["cancel_event"].is_set():
+                        continue
+                    if now_ts < float(self._unanswered_recheck_after_ts.get(fid) or 0.0):
+                        continue
+                last_ct = str(th.get("last_contact_at") or "").strip()
+                if last_ct and max_age_hours > 0:
+                    parsed_dt = None
+                    for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f"):
+                        try:
+                            parsed_dt = datetime.strptime(last_ct, fmt)
+                            break
+                        except ValueError:
+                            continue
+                    if parsed_dt is not None:
+                        age_h = (now_local - parsed_dt).total_seconds() / 3600.0
+                        if age_h > max_age_hours:
+                            continue
+                result.add(fid)
+        except Exception as e:
+            logger.debug(f"[{self.char_id}] _get_actionable_unanswered_fan_ids check skipped: {e}")
+        return result
+
     def _poll_fansly_page_once(self, page: Any, now_dt: Optional[datetime] = None) -> int:
         """
         https://fansly.com/messages 上のスレッド一覧を巡回し、
@@ -2255,6 +2984,8 @@ class CharacterBotWorker:
             )
             self.last_error = None
 
+            db_unanswered_fids = self._get_actionable_unanswered_fan_ids(max_age_hours=24.0)
+            now_poll_ts = time.time()
             candidates = [
                 t
                 for t in snapshot[:15]
@@ -2263,7 +2994,9 @@ class CharacterBotWorker:
                     int(t.get("idx", 99)) < 5
                     and _is_recent_thread_time(str(t.get("time_text") or ""))
                     and self._checked_read_previews.get(str(t.get("fan_id") or "")) != str(t.get("preview_text") or "")
+                    and now_poll_ts >= float(self._unanswered_recheck_after_ts.get(str(t.get("fan_id") or "")) or 0.0)
                 )
+                or (str(t.get("fan_id") or "").strip() in db_unanswered_fids)
             ]
             if not candidates:
                 return 0
@@ -2277,7 +3010,12 @@ class CharacterBotWorker:
                 fan_id = str(t.get("fan_id") or "").strip()
                 username = str(t.get("username") or fan_id).strip()
                 preview_text = str(t.get("preview_text") or "").strip()
-                reason = f"badge={t.get('unread_count')}" if t.get("has_unread") else f"recent={t.get('time_text')}"
+                if t.get("has_unread"):
+                    reason = f"badge={t.get('unread_count')}"
+                elif fan_id in db_unanswered_fids:
+                    reason = f"db_unanswered_recovery(t={t.get('time_text')})"
+                else:
+                    reason = f"recent={t.get('time_text')}"
 
                 logger.info(f"[{self.char_id}] Inspecting @{fan_id} ({reason}, href={t.get('group_href')})...")
                 if not self._ensure_fan_conversation_open(page, fan_id):
@@ -2478,7 +3216,12 @@ class CharacterBotWorker:
                         last_page_poll_ts = now_loop_ts
                         if page is not None:
                             try:
-                                self._poll_fansly_page_once(page=page)
+                                with self._page_lock:
+                                    self._in_busy_op = True
+                                    try:
+                                        self._poll_fansly_page_once(page=page)
+                                    finally:
+                                        self._in_busy_op = False
                             except Exception as poll_fatal_err:
                                 logger.warning(
                                     f"[{self.char_id}] Resetting browser context after poll failure: {poll_fatal_err}"
@@ -2496,7 +3239,7 @@ class CharacterBotWorker:
                         if not e["cancel_event"].is_set()
                     ]
                 wait_sec = min([1.0] + next_due_list) if next_due_list else min(2.0, self.poll_interval_sec)
-                if not self._wait_interruptible(wait_sec, cancel_event=my_stop_event):
+                if not self._wait_interruptible(wait_sec, cancel_event=my_stop_event, wake_on_activity=True):
                     break
         except Exception as loop_err:
             self.last_error = str(loop_err)
@@ -2613,11 +3356,13 @@ class BotManager:
             with worker._lock:
                 thread_alive = bool(worker.running and worker._thread and worker._thread.is_alive())
                 hb_ts = float(worker.last_heartbeat_ts or 0.0)
+                in_busy_op = bool(worker._in_busy_op)
 
+            effective_threshold = max(threshold, 180.0) if in_busy_op else threshold
             reason: Optional[str] = None
             if not thread_alive:
                 reason = "worker_thread_stopped"
-            elif hb_ts > 0.0 and (now_ts - hb_ts) > threshold:
+            elif hb_ts > 0.0 and (now_ts - hb_ts) > effective_threshold:
                 reason = f"heartbeat_stale_{int(now_ts - hb_ts)}s"
 
             if reason is not None:
@@ -2750,6 +3495,14 @@ class BotManager:
                     combined[f"{cid}::{fid}"] = snap
             return combined
 
+    def has_active_session_activity(self, char_id: str, fan_id: str) -> bool:
+        """指定キャラ・ファンに対して自動返信カウントダウン中または未送信キューが存在するか判定する"""
+        if not char_id or not fan_id:
+            return False
+        with self._lock:
+            worker = self._get_or_create_worker(char_id)
+        return worker.has_active_session_activity(fan_id)
+
     def skip_to_manual(
         self,
         char_id: str,
@@ -2822,8 +3575,9 @@ class BotManager:
             allow_when_bot_off=True,
             db_path=db_path,
         )
-        if start_worker and not self.fast_mode and not worker.running:
+        if start_worker and not self.fast_mode and not (worker.running and worker._thread and worker._thread.is_alive()):
             worker.start()
+            self.start_watchdog()
 
         snap = worker.get_pending_replies_snapshot(fan_id).get(fan_id)
         updated_fan = get_fan_record(char_id, fan_id, db_path=db_path) or {}
@@ -2906,7 +3660,7 @@ class BotManager:
     ) -> Dict[str, Any]:
         with self._lock:
             worker = self._get_or_create_worker(char_id)
-            return worker.enqueue_outbound(
+            queued_item = worker.enqueue_outbound(
                 {
                     "fan_id": fan_id,
                     "username": username or fan_id,
@@ -2917,6 +3671,16 @@ class BotManager:
                     "source": source,
                 }
             )
+            if (
+                not self.fast_mode
+                and self._monitoring_active
+                and not queued_item.get("skipped_active_pending_reply")
+                and not worker.manual_login_active
+                and not (worker.running and worker._thread and worker._thread.is_alive())
+            ):
+                worker.start()
+                self.start_watchdog()
+            return queued_item
 
     def handle_incoming_message(
         self,
