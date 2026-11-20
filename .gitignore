@@ -1,0 +1,49 @@
+# === 顧客個人情報・DB・収益データ（絶対厳守） ===
+shared_assets/database/*.db
+shared_assets/database/*.db-wal
+shared_assets/database/*.db-shm
+**/fans_data/
+**/logs/
+*.log
+
+# === キャラクター設定・アダルトメディア素材 ===
+shared_assets/characters/**/ppv_vault/
+shared_assets/characters/**/post_media/
+shared_assets/characters/**/profile.json
+shared_assets/characters/**/plans.json
+
+# === 認証情報・ブラウザセッション ===
+.env
+*.env
+**/playwright_session/
+**/cookies/
+*secret*
+*credential*
+
+# === Python / IDE / OS ===
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# === 実ディレクトリ名・大量JSON・メディア追加ガード ===
+**/.chrome_profile/
+**/browser_profile/
+**/01_candidates/
+**/03_posted/
+**/99_rejected/
+AI_Factory/characters/
+*.sqlite
+*.sqlite3
+*.mp4
+*.mov
+*.webm
+*.png
+*.jpg
+*.jpeg
+*.webp

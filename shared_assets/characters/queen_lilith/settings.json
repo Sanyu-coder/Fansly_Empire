@@ -1,0 +1,37 @@
+{
+  "bot_enabled": true,
+  "default_prices": {
+    "1": {
+      "base_price_usd": 9.99,
+      "tripwire_price_usd": 5.99,
+      "whale_price_usd": 19.99
+    },
+    "2": {
+      "base_price_usd": 19.99,
+      "tripwire_price_usd": 14.99,
+      "whale_price_usd": 34.99
+    },
+    "3": {
+      "base_price_usd": 39.99,
+      "tripwire_price_usd": 29.99,
+      "whale_price_usd": 69.99
+    }
+  },
+  "sleep_schedule": {
+    "enabled": false,
+    "start": "19:00",
+    "end": "22:00"
+  },
+  "min_reply_delay_sec": 30,
+  "max_reply_delay_sec": 180,
+  "short_msg_chars_threshold": 20,
+  "long_msg_chars_threshold": 150,
+  "stage_thresholds": {
+    "1_Icebreak": 30,
+    "2_Explore": 60,
+    "3_Lead_Pitch": 85
+  },
+  "stage_threshold_icebreak": 30,
+  "stage_threshold_explore": 60,
+  "stage_threshold_lead_pitch": 85
+}
