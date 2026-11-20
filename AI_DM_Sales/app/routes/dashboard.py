@@ -31,12 +31,14 @@ from app.core.llm_client import llm_client
 from app.services.character_loader import (
     ensure_character_files,
     get_char_paths,
+    is_vault_item_sendable_to_customer,
     list_all_characters_overview,
     list_character_ids,
     load_dm_persona,
     load_plans,
     load_settings,
     load_vault_items,
+    resolve_customer_safe_ppv_media_path,
     save_dm_persona,
     save_plans,
     save_settings,
@@ -471,7 +473,11 @@ def api_monitoring_ppv_candidates():
 
     plans = load_plans(char_id)
     vault_dir = get_char_paths(char_id)["vault_dir"]
-    vault_items = [it for it in load_vault_items(char_id) if bool(it.get("is_active", True))]
+    vault_items = [
+        it
+        for it in load_vault_items(char_id)
+        if bool(it.get("is_active", True)) and is_vault_item_sendable_to_customer(char_id, it)
+    ]
 
     fan_rec = get_fan_record(char_id, fan_id) if fan_id else None
     total_spent = float((fan_rec or {}).get("total_spent_usd") or 0.0)
@@ -566,8 +572,57 @@ def api_monitoring_send_manual():
     manual_tx_id: Optional[int] = None
 
     if attached_ppv_id:
+        raw_req_fname = str(data.get("filename") or "").replace("\\", "/").strip().lstrip("/")
+        if any(p.lower() == "originals" for p in raw_req_fname.split("/") if p):
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "error": "原本（originals/）ファイルの顧客送信はシステムにより禁止されています。",
+                        "code": "ORIGINAL_MEDIA_BLOCKED",
+                    }
+                ),
+                400,
+            )
+
         vault_items = load_vault_items(char_id)
         found_v = next((v for v in vault_items if v.get("ppv_id") == attached_ppv_id), None)
+        if found_v is None:
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "error": f"指定されたPPV素材 '{attached_ppv_id}' が見つかりません。",
+                        "code": "PPV_NOT_FOUND",
+                    }
+                ),
+                404,
+            )
+        if not is_vault_item_sendable_to_customer(char_id, found_v):
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "error": f"未加工のPPV素材 '{attached_ppv_id}' は顧客へ送信できません。先にモザイク／ぼかし加工を完了してください。",
+                        "code": "UNREDACTED_PPV_BLOCKED",
+                    }
+                ),
+                400,
+            )
+
+        safe_media_path, guard_err = resolve_customer_safe_ppv_media_path(char_id, found_v)
+        if safe_media_path is None:
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "error": guard_err or "加工済みPPVメディアファイルが確認できないため送信をブロックしました。",
+                        "code": "PPV_MEDIA_GUARD_BLOCKED",
+                    }
+                ),
+                400,
+            )
+
         raw_p = data.get("ppv_price_usd")
         pricing_preset = str(data.get("pricing_preset") or "").strip().lower()
         if raw_p not in (None, ""):
@@ -585,10 +640,11 @@ def api_monitoring_send_manual():
         if attached_price is None:
             attached_price = 9.99
 
-        if found_v:
-            attached_ppv_item = {**found_v, "offered_price_usd": attached_price}
-        else:
-            attached_ppv_item = {"ppv_id": attached_ppv_id, "offered_price_usd": attached_price}
+        attached_ppv_item = {
+            **found_v,
+            "filename": os.path.basename(safe_media_path),
+            "offered_price_usd": attached_price,
+        }
 
         if not content:
             hint_en = str((found_v or {}).get("pitch_hint") or "").strip()

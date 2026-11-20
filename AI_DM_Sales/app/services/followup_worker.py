@@ -20,6 +20,7 @@ from app.core.database import (
 )
 from app.core.llm_client import llm_client
 from app.services.character_loader import (
+    is_vault_item_sendable_to_customer,
     load_dm_persona,
     load_plans,
     load_settings,
@@ -460,6 +461,7 @@ class FollowupWorker:
                 v
                 for v in vault_items
                 if bool(v.get("is_active", True))
+                and is_vault_item_sendable_to_customer(cid, v)
                 and int(v.get("ladder_step") or 1) == 2
                 and str(v.get("ppv_id") or "") not in unlocked_ids
             ]

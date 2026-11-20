@@ -2,7 +2,7 @@ import json
 import os
 import re
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from app.core import config
 from app.core.database import (
@@ -250,6 +250,20 @@ def _normalize_vault_item(char_id: str, item: Dict[str, Any], index_num: int) ->
     is_active_raw = item.get("is_active", True)
     is_active = bool(is_active_raw) if is_active_raw is not None else True
 
+    if "is_redacted" in item and item["is_redacted"] is not None:
+        is_redacted = bool(item["is_redacted"])
+    elif "redact_status" in item and item["redact_status"] is not None:
+        is_redacted = str(item["redact_status"]).strip().lower() in ("redacted", "processed", "done")
+    else:
+        is_redacted = bool(is_active)
+
+    redact_status = "redacted" if is_redacted else "unredacted"
+    redact_type_raw = str(item.get("redact_type") or "").strip().lower()
+    redact_type = redact_type_raw if redact_type_raw in ("mosaic", "blur") else ""
+    raw_boxes = item.get("redact_boxes")
+    redact_boxes = [dict(b) for b in raw_boxes if isinstance(b, dict)] if isinstance(raw_boxes, list) else []
+    redacted_at = str(item.get("redacted_at") or "").strip()
+
     created_at = str(item.get("created_at") or f"2026-11-18T00:{index_num:02d}:00")
 
     blur_preview_filename = str(item.get("blur_preview_filename") or "").replace("\\", "/").strip().lstrip("/")
@@ -277,8 +291,94 @@ def _normalize_vault_item(char_id: str, item: Dict[str, Any], index_num: int) ->
         "pitch_note": pitch_note,
         "pitch_hint": str(item.get("pitch_hint") or ""),
         "is_active": is_active,
+        "is_redacted": is_redacted,
+        "redact_status": redact_status,
+        "redact_type": redact_type,
+        "redact_boxes": redact_boxes,
+        "redacted_at": redacted_at,
         "created_at": created_at,
     }
+
+
+def is_vault_item_sendable_to_customer(char_id: str, item: Optional[Dict[str, Any]]) -> bool:
+    """
+    顧客へ送信可能な加工済みPPV素材かどうかを厳格判定する。
+    - is_redacted == False（新規アップロード後の未加工状態）または redact_status == 'unredacted' の場合はブロック
+    - originals/ 配下を参照しているファイル名もブロック
+    """
+    if not isinstance(item, dict):
+        return False
+    raw_fname = str(item.get("filename") or "").replace("\\", "/").strip().lstrip("/")
+    if not raw_fname:
+        return False
+    parts = [p.lower() for p in raw_fname.split("/") if p]
+    if "originals" in parts:
+        return False
+    if item.get("is_redacted") is False:
+        return False
+    if str(item.get("redact_status") or "").strip().lower() == "unredacted":
+        return False
+    return True
+
+
+def resolve_customer_safe_ppv_media_path(char_id: str, item_or_filename: Any) -> Tuple[Optional[str], Optional[str]]:
+    """
+    顧客送信用の加工済みメディア絶対パスを安全に解決する。
+    未加工アイテム・originals/ 参照・ディレクトリトラバーサル・実ファイル不在の場合は (None, error_reason) を返す。
+    """
+    paths = get_char_paths(char_id)
+    vault_dir = os.path.abspath(paths["vault_dir"])
+    originals_dir = os.path.abspath(os.path.join(vault_dir, "originals"))
+
+    ppv_id = ""
+    raw_fname = ""
+    item_dict: Optional[Dict[str, Any]] = item_or_filename if isinstance(item_or_filename, dict) else None
+
+    if item_dict is not None:
+        ppv_id = str(item_dict.get("ppv_id") or "").strip()
+        raw_fname = str(item_dict.get("filename") or "").strip()
+    else:
+        raw_fname = str(item_or_filename or "").strip()
+
+    norm_raw = raw_fname.replace("\\", "/").strip().lstrip("/")
+    if any(p.lower() == "originals" for p in norm_raw.split("/") if p):
+        return None, "Direct reference to originals/ directory is strictly forbidden for customer delivery."
+
+    vault_items = load_vault_items(char_id)
+    matched_vault_item: Optional[Dict[str, Any]] = None
+    clean_base = os.path.basename(norm_raw) if norm_raw else ""
+
+    if ppv_id:
+        matched_vault_item = next((v for v in vault_items if str(v.get("ppv_id") or "") == ppv_id), None)
+    if matched_vault_item is None and clean_base:
+        matched_vault_item = next(
+            (v for v in vault_items if os.path.basename(str(v.get("filename") or "")).lower() == clean_base.lower()),
+            None,
+        )
+
+    effective_item = matched_vault_item if matched_vault_item is not None else item_dict
+    if effective_item is not None and not is_vault_item_sendable_to_customer(char_id, effective_item):
+        return None, f"PPV item '{ppv_id or clean_base}' is unredacted and blocked from customer delivery."
+
+    target_fname = os.path.basename(
+        str((effective_item or {}).get("filename") or clean_base).replace("\\", "/").strip()
+    )
+    if not target_fname:
+        return None, "PPV media filename is empty."
+
+    full_path = os.path.abspath(os.path.join(vault_dir, target_fname))
+    try:
+        if os.path.commonpath([vault_dir, full_path]) != vault_dir:
+            return None, "Resolved PPV media path escapes vault_dir."
+        if os.path.commonpath([originals_dir, full_path]) == originals_dir:
+            return None, "Resolved PPV media path points inside originals/."
+    except ValueError:
+        return None, "Invalid PPV media path."
+
+    if not os.path.isfile(full_path) or os.path.getsize(full_path) <= 0:
+        return None, f"Processed PPV media file not found: {full_path}"
+
+    return full_path, None
 
 
 def ensure_character_files(char_id: str) -> Dict[str, str]:

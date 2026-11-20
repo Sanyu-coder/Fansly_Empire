@@ -31,9 +31,11 @@ from app.core.llm_client import LLMClient, llm_client
 from app.services.character_loader import (
     ensure_character_files,
     is_character_sleeping,
+    is_vault_item_sendable_to_customer,
     list_character_ids,
     load_plans,
     load_settings,
+    resolve_customer_safe_ppv_media_path,
     save_settings,
 )
 from logging.handlers import RotatingFileHandler
@@ -1090,6 +1092,15 @@ class CharacterBotWorker:
             if next_phase in ("3_Lead_Pitch", "4_Lock_Close", "4_Closing")
             else None
         )
+        if selected_ppv and isinstance(selected_ppv, dict):
+            safe_sel_path, sel_guard_err = resolve_customer_safe_ppv_media_path(self.char_id, selected_ppv)
+            if safe_sel_path is None:
+                logger.warning(
+                    f"[{self.char_id}] Blocked unredacted/unsafe PPV attachment during reply scheduling: {sel_guard_err}"
+                )
+                selected_ppv = None
+            else:
+                selected_ppv = {**selected_ppv, "filename": os.path.basename(safe_sel_path)}
         delay_cfg = get_configured_reply_delay_settings(self.char_id, db_path=db_path)
         delay_calc = _compute_human_reply_delay_sec(
             fan_text=fan_message_en,
@@ -1391,6 +1402,17 @@ class CharacterBotWorker:
         ai_ja = entry["ai_ja"]
         next_phase = entry["sales_phase"]
         selected_ppv = entry.get("selected_ppv")
+        if selected_ppv and isinstance(selected_ppv, dict):
+            safe_exec_path, exec_guard_err = resolve_customer_safe_ppv_media_path(self.char_id, selected_ppv)
+            if safe_exec_path is None:
+                logger.error(
+                    f"[{self.char_id}] Guard blocked PPV delivery to @{fan_id} at send time: {exec_guard_err}"
+                )
+                selected_ppv = None
+                entry["selected_ppv"] = None
+            else:
+                selected_ppv = {**selected_ppv, "filename": os.path.basename(safe_exec_path)}
+                entry["selected_ppv"] = selected_ppv
         read_delay = float(entry.get("read_delay_sec") or 0.0)
         typing_delay = 0.0 if entry.get("typing_done") else float(entry.get("typing_delay_sec") or 0.0)
 
@@ -2418,24 +2440,28 @@ class CharacterBotWorker:
                 offered_price = float(
                     selected_ppv.get("offered_price_usd") or selected_ppv.get("base_price_usd") or 9.99
                 )
-                if filename:
-                    media_path = os.path.join(self.vault_dir, filename)
-                    if os.path.isfile(media_path):
-                        # リトライ後半 (retry_count >= 2) はぼかしプレビュー起因のDOM異常を回避するため標準ロックPPV添付へ安全フォールバック
-                        skip_blur = int(retry_count or 0) >= 2
-                        if not self._attach_ppv_with_price_modal(
-                            page=page,
-                            media_path=media_path,
-                            offered_price=offered_price,
-                            selected_ppv=selected_ppv,
-                            skip_blur_preview=skip_blur,
-                        ):
-                            logger.warning(f"[{self.char_id}] PPV attach failed for {filename}; aborting send")
-                            self._cleanup_lingering_modals(page, clear_composer_attachments=True)
-                            return False
-                        attached_ppv_ok = True
-                    else:
-                        logger.warning(f"[{self.char_id}] Local PPV media file not found: {media_path}")
+                safe_media_path, guard_err = resolve_customer_safe_ppv_media_path(self.char_id, selected_ppv)
+                if safe_media_path is None:
+                    msg = f"Unredacted/unsafe PPV blocked from customer send ({filename or selected_ppv.get('ppv_id')}): {guard_err}"
+                    logger.error(f"[{self.char_id}] {msg}")
+                    self.last_error = msg
+                    self._cleanup_lingering_modals(page, clear_composer_attachments=True)
+                    return False
+
+                media_path = safe_media_path
+                # リトライ後半 (retry_count >= 2) はぼかしプレビュー起因のDOM異常を回避するため標準ロックPPV添付へ安全フォールバック
+                skip_blur = int(retry_count or 0) >= 2
+                if not self._attach_ppv_with_price_modal(
+                    page=page,
+                    media_path=media_path,
+                    offered_price=offered_price,
+                    selected_ppv=selected_ppv,
+                    skip_blur_preview=skip_blur,
+                ):
+                    logger.warning(f"[{self.char_id}] PPV attach failed for {os.path.basename(media_path)}; aborting send")
+                    self._cleanup_lingering_modals(page, clear_composer_attachments=True)
+                    return False
+                attached_ppv_ok = True
 
             chat_input = _query_first(page, FANSLY_SELECTORS["chat_input"])
             if chat_input is None and hasattr(page, "wait_for_selector"):
@@ -2597,7 +2623,16 @@ class CharacterBotWorker:
             raw_ppv = item.get("ppv_item") if isinstance(item.get("ppv_item"), dict) else None
             ppv_item = None
             if raw_ppv:
+                safe_out_path, out_guard_err = resolve_customer_safe_ppv_media_path(self.char_id, raw_ppv)
+                if safe_out_path is None:
+                    logger.error(
+                        f"[{self.char_id}] Dropping outbox PPV ({source}) for @{fan_id}: {out_guard_err}"
+                    )
+                    self.last_error = str(out_guard_err)
+                    self._outbox_queue.task_done()
+                    continue
                 ppv_item = dict(raw_ppv)
+                ppv_item["filename"] = os.path.basename(safe_out_path)
                 if item.get("offered_price") is not None:
                     try:
                         ppv_item["offered_price_usd"] = round(float(item["offered_price"]), 2)
@@ -2662,7 +2697,11 @@ class CharacterBotWorker:
                 elif effective_page is not None:
                     err_low = str(self.last_error or "").lower()
                     next_retry = retries_so_far + 1
-                    if "dm permission restricted" not in err_low and next_retry <= max(1, int(self._max_send_retries)):
+                    is_non_retryable = (
+                        "dm permission restricted" in err_low
+                        or "unredacted/unsafe ppv blocked" in err_low
+                    )
+                    if not is_non_retryable and next_retry <= max(1, int(self._max_send_retries)):
                         item["retry_count"] = next_retry
                         item["next_attempt_ts"] = time.time() + (
                             0.2 if self.fast_mode else float(self._retry_backoff_base_sec) * next_retry

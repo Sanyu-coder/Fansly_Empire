@@ -4,7 +4,7 @@ import os
 import re
 import tempfile
 from datetime import datetime
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from flask import Blueprint, Response, jsonify, request, send_file
 from werkzeug.utils import secure_filename
@@ -26,6 +26,7 @@ from app.services.character_loader import (
     ensure_character_files,
     get_char_paths,
     get_next_vault_sequence,
+    is_vault_item_sendable_to_customer,
     list_character_ids,
     load_dm_persona,
     load_settings,
@@ -35,15 +36,20 @@ from app.services.character_loader import (
 )
 from app.services.media_blur_service import (
     BLUR_SUBDIR_NAME,
+    ORIGINALS_SUBDIR_NAME,
     cleanup_blur_preview,
+    cleanup_original_backup,
     extract_first_frame_image,
     generate_blur_previews_for_all_characters,
     generate_blur_previews_for_character,
     generate_blurred_preview,
     get_blur_preview_relpath,
+    get_original_media_relpath,
     is_video_media,
     prepare_vault_media_assets,
+    redact_media_file,
     resolve_existing_blur_preview_path,
+    resolve_existing_original_media_path,
 )
 
 vault_bp = Blueprint("vault_bp", __name__)
@@ -86,8 +92,12 @@ MIME_OVERRIDES = {
 }
 
 
-def resolve_vault_media_file(char_id: str, filename: str) -> Tuple[str, str, bool]:
-    """Windowsバックスラッシュ等を正規化し、ppv_vault（および previews サブフォルダ）内の実在ファイルパスと存在有無を返す"""
+def resolve_vault_media_file(char_id: str, filename: str, version: str = "processed") -> Tuple[str, str, bool]:
+    """
+    Windowsバックスラッシュ等を正規化し、ppv_vault（および previews / originals サブフォルダ）内の実在ファイルパスと存在有無を返す。
+    - version == 'original': originals/<filename> に退避された無修正原本を優先し、存在しない場合は ppv_vault/<filename> へフォールバック。
+    - version != 'original': 通常の加工後ファイル（originals/ の直接パス指定は遮断）または previews/ ぼかし画像を返す。
+    """
     paths = get_char_paths(char_id)
     vault_dir = os.path.abspath(paths["vault_dir"])
     normalized_raw = str(filename or "").replace("\\", "/").strip().lstrip("/")
@@ -98,7 +108,10 @@ def resolve_vault_media_file(char_id: str, filename: str) -> Tuple[str, str, boo
     if not parts:
         return "", "", False
 
-    if len(parts) == 2 and parts[0].lower() == BLUR_SUBDIR_NAME:
+    ver_norm = str(version or "processed").strip().lower()
+    want_original = ver_norm == "original"
+
+    if len(parts) == 2 and parts[0].lower() == BLUR_SUBDIR_NAME.lower() and not want_original:
         rel_clean = f"{BLUR_SUBDIR_NAME}/{os.path.basename(parts[1])}"
         target_dir = os.path.abspath(os.path.join(vault_dir, BLUR_SUBDIR_NAME))
         full_path = os.path.abspath(os.path.join(target_dir, os.path.basename(parts[1])))
@@ -111,9 +124,31 @@ def resolve_vault_media_file(char_id: str, filename: str) -> Tuple[str, str, boo
             return rel_clean, full_path, True
         return rel_clean, full_path, False
 
+    # version=original 以外で originals/ パスが直接指定された場合は不正参照防止のため拒否
+    if any(p.lower() == ORIGINALS_SUBDIR_NAME.lower() for p in parts[:-1]) and not want_original:
+        return "", "", False
+
     safe_name = os.path.basename(parts[-1])
     if not safe_name:
         return "", "", False
+
+    if want_original:
+        orig_dir = os.path.abspath(os.path.join(vault_dir, ORIGINALS_SUBDIR_NAME))
+        orig_full = os.path.abspath(os.path.join(orig_dir, safe_name))
+        try:
+            if os.path.commonpath([vault_dir, orig_full]) == vault_dir:
+                if os.path.isfile(orig_full) and os.path.getsize(orig_full) > 0:
+                    return safe_name, orig_full, True
+                if os.path.isdir(orig_dir):
+                    lower_target = safe_name.lower()
+                    for entry in os.listdir(orig_dir):
+                        if entry.lower() == lower_target:
+                            cand_orig = os.path.abspath(os.path.join(orig_dir, entry))
+                            if os.path.isfile(cand_orig) and os.path.getsize(cand_orig) > 0:
+                                return entry, cand_orig, True
+        except ValueError:
+            return safe_name, orig_full, False
+
     full_path = os.path.abspath(os.path.join(vault_dir, safe_name))
     try:
         if os.path.commonpath([vault_dir, full_path]) != vault_dir:
@@ -470,7 +505,12 @@ def api_vault_upload():
         "description_memo": description_memo,
         "pitch_note": description_memo,
         "pitch_hint": pitch_hint,
-        "is_active": True,
+        "is_active": False,
+        "is_redacted": False,
+        "redact_status": "unredacted",
+        "redact_type": "",
+        "redact_boxes": [],
+        "redacted_at": "",
         "created_at": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
     }
 
@@ -539,11 +579,13 @@ def api_vault_list():
             ppv_id = item["ppv_id"]
             safe_name, full_media_path, exists = resolve_vault_media_file(cid, str(item.get("filename") or ""))
             blur_abs = resolve_existing_blur_preview_path(full_media_path) if exists and full_media_path else None
+            orig_abs = resolve_existing_original_media_path(full_media_path) if full_media_path else None
             blur_rel = (
                 get_blur_preview_relpath(safe_name or str(item.get("filename") or ""))
                 if blur_abs
                 else str(item.get("blur_preview_filename") or "")
             )
+            fname_for_url = safe_name or str(item.get("filename") or "")
             st = tx_stats.get(ppv_id) or {
                 "offers_count": 0,
                 "purchases_count": 0,
@@ -553,8 +595,14 @@ def api_vault_list():
             enriched_items.append(
                 {
                     **item,
-                    "filename": safe_name or item.get("filename"),
+                    "filename": fname_for_url,
                     "file_exists": exists,
+                    "original_exists": bool(orig_abs),
+                    "original_relpath": get_original_media_relpath(fname_for_url) if orig_abs else "",
+                    "media_url": f"/api/vault/media/{cid}/{fname_for_url}" if fname_for_url else "",
+                    "original_media_url": (
+                        f"/api/vault/media/{cid}/{fname_for_url}?version=original" if fname_for_url else ""
+                    ),
                     "blur_preview_filename": blur_rel,
                     "blur_preview_exists": bool(blur_abs),
                     "blur_preview_url": f"/api/vault/media/{cid}/{blur_rel}" if blur_abs and blur_rel else "",
@@ -657,7 +705,19 @@ def api_vault_update():
             if "pitch_hint" in data and data["pitch_hint"] is not None:
                 item["pitch_hint"] = str(data["pitch_hint"]).strip()
             if "is_active" in data and data["is_active"] is not None:
-                item["is_active"] = bool(data["is_active"])
+                want_active = bool(data["is_active"])
+                if want_active and not is_vault_item_sendable_to_customer(char_id, item):
+                    return (
+                        jsonify(
+                            {
+                                "ok": False,
+                                "error": "未加工のPPV素材は公開にできません。先にモザイク／ぼかし加工を保存してください。",
+                                "code": "UNREDACTED_MEDIA_LOCKED",
+                            }
+                        ),
+                        400,
+                    )
+                item["is_active"] = want_active
             updated_item = item
             break
 
@@ -676,6 +736,201 @@ def api_vault_update():
             "ok": True,
             "char_id": char_id,
             "item": {**updated_item, "char_id": char_id, **tx_stats},
+        }
+    )
+
+
+@vault_bp.route("/api/vault/redact", methods=["POST"])
+def api_vault_redact():
+    """
+    PPVメディアの陰部自動検出（preview_detect_only: true）および
+    局部モザイク(mosaic)／ガウシアンぼかし(blur)加工の確定適用API。
+    確定実行時は:
+      1) 原本を originals/<filename> に保持したまま加工後ファイルを書き出し
+      2) 全画面強ぼかしプレビュー画像（previews/<stem>_blur.jpg）を再生成
+      3) アイテムのステータスを加工済み（is_redacted=True, redact_status='redacted'）へ更新し、
+         is_active を自動的に True（公開）へ切り替えて保存・DB同期する
+    """
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        data = request.form.to_dict() if request.form else {}
+
+    char_id = str(data.get("char_id") or "").strip()
+    ppv_id = str(data.get("ppv_id") or "").strip()
+    raw_filename = str(data.get("filename") or "").strip()
+
+    if not char_id or (not ppv_id and not raw_filename):
+        return jsonify({"ok": False, "error": "char_id and ppv_id (or filename) are required"}), 400
+
+    def _to_bool(val: Any, default: bool = False) -> bool:
+        if val is None:
+            return default
+        if isinstance(val, bool):
+            return val
+        if isinstance(val, (int, float)):
+            return bool(val)
+        return str(val).strip().lower() in ("1", "true", "yes", "on")
+
+    preview_detect_only = _to_bool(data.get("preview_detect_only"), default=False)
+    auto_detect = _to_bool(data.get("auto_detect"), default=preview_detect_only)
+    redact_type = str(data.get("redact_type") or "mosaic").strip().lower() or "mosaic"
+
+    raw_boxes = data.get("boxes")
+    if isinstance(raw_boxes, str):
+        raw_boxes_str = raw_boxes.strip()
+        if raw_boxes_str:
+            try:
+                raw_boxes = json.loads(raw_boxes_str)
+            except Exception:
+                return jsonify({"ok": False, "error": "Invalid JSON format for boxes"}), 400
+        else:
+            raw_boxes = []
+
+    mosaic_block_size: Optional[int] = None
+    if data.get("mosaic_block_size") not in (None, ""):
+        try:
+            mosaic_block_size = int(data["mosaic_block_size"])
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "error": "mosaic_block_size must be an integer"}), 400
+
+    blur_radius: Optional[float] = None
+    if data.get("blur_radius") not in (None, ""):
+        try:
+            blur_radius = float(data["blur_radius"])
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "error": "blur_radius must be a number"}), 400
+
+    items = load_vault_items(char_id)
+    target_item: Optional[Dict[str, Any]] = None
+    for it in items:
+        if ppv_id and it.get("ppv_id") == ppv_id:
+            target_item = it
+            break
+    if target_item is None and raw_filename:
+        clean_req_fname = os.path.basename(raw_filename.replace("\\", "/").strip())
+        for it in items:
+            if os.path.basename(str(it.get("filename") or "")).lower() == clean_req_fname.lower():
+                target_item = it
+                ppv_id = str(it.get("ppv_id") or "")
+                break
+
+    if target_item is None:
+        return jsonify({"ok": False, "error": f"PPV item '{ppv_id or raw_filename}' not found"}), 404
+
+    item_filename = os.path.basename(str(target_item.get("filename") or raw_filename).replace("\\", "/").strip())
+    if not item_filename:
+        return jsonify({"ok": False, "error": "PPV item filename is missing"}), 400
+
+    paths = get_char_paths(char_id)
+    vault_dir = os.path.abspath(paths["vault_dir"])
+    media_path = os.path.abspath(os.path.join(vault_dir, item_filename))
+    media_type = str(target_item.get("media_type") or detect_media_type(item_filename))
+
+    safe_resolved_name, resolved_path, exists_main = resolve_vault_media_file(char_id, item_filename, version="processed")
+    if exists_main and resolved_path:
+        media_path = resolved_path
+        item_filename = safe_resolved_name
+
+    orig_existing = resolve_existing_original_media_path(media_path)
+    if not os.path.isfile(media_path) and not orig_existing:
+        return jsonify({"ok": False, "error": f"Media file not found: {item_filename}"}), 404
+
+    try:
+        redact_res = redact_media_file(
+            media_path=media_path,
+            redact_type=redact_type,
+            boxes=raw_boxes if isinstance(raw_boxes, (list, tuple, dict)) else None,
+            auto_detect=auto_detect,
+            output_path=media_path,
+            media_type=media_type,
+            preview_detect_only=preview_detect_only,
+            regenerate_blur_preview=True,
+            mosaic_block_size=mosaic_block_size,
+            blur_radius=blur_radius,
+        )
+    except ValueError as ve:
+        return jsonify({"ok": False, "error": str(ve)}), 400
+    except FileNotFoundError as fnf:
+        return jsonify({"ok": False, "error": str(fnf)}), 404
+    except Exception as exc:
+        return jsonify({"ok": False, "error": f"Redaction failed: {exc}"}), 500
+
+    if preview_detect_only:
+        return jsonify(
+            {
+                "ok": True,
+                "char_id": char_id,
+                "ppv_id": target_item.get("ppv_id"),
+                "filename": item_filename,
+                "preview_detect_only": True,
+                "detected": bool(redact_res.get("detected", False)),
+                "boxes": list(redact_res.get("boxes") or []),
+            }
+        )
+
+    blur_rel = str(redact_res.get("blur_preview_filename") or "")
+    blur_abs = redact_res.get("blur_preview_path") or resolve_existing_blur_preview_path(media_path)
+    if not blur_abs or not os.path.isfile(str(blur_abs)):
+        blur_abs = generate_blurred_preview(media_path=media_path, media_type=media_type)
+    if blur_abs and os.path.isfile(str(blur_abs)):
+        blur_rel = get_blur_preview_relpath(item_filename)
+
+    now_iso = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+    applied_boxes = list(redact_res.get("boxes") or [])
+    applied_type = str(redact_res.get("redact_type") or redact_type)
+
+    target_item["filename"] = item_filename
+    if blur_rel:
+        target_item["blur_preview_filename"] = blur_rel
+    target_item["is_redacted"] = True
+    target_item["redact_status"] = "redacted"
+    target_item["redact_type"] = applied_type
+    target_item["redact_boxes"] = applied_boxes
+    target_item["redacted_at"] = now_iso
+    target_item["is_active"] = True
+
+    saved_items = save_vault_items(char_id, items)
+    saved_item = next((x for x in saved_items if x.get("ppv_id") == target_item.get("ppv_id")), target_item)
+
+    tx_stats = get_ppv_stats_by_char(char_id).get(str(target_item.get("ppv_id") or "")) or {
+        "offers_count": 0,
+        "purchases_count": 0,
+        "revenue_usd": 0.0,
+        "cvr_percent": 0.0,
+    }
+    blur_url = f"/api/vault/media/{char_id}/{blur_rel}" if (blur_abs and blur_rel) else ""
+    orig_rel = str(redact_res.get("original_relpath") or get_original_media_relpath(item_filename))
+
+    return jsonify(
+        {
+            "ok": True,
+            "char_id": char_id,
+            "ppv_id": saved_item.get("ppv_id"),
+            "filename": item_filename,
+            "redact_type": applied_type,
+            "redact_status": "redacted",
+            "is_redacted": True,
+            "is_active": True,
+            "detected": bool(redact_res.get("detected", False)),
+            "boxes": applied_boxes,
+            "original_relpath": orig_rel,
+            "original_media_url": f"/api/vault/media/{char_id}/{item_filename}?version=original",
+            "media_url": f"/api/vault/media/{char_id}/{item_filename}",
+            "blur_preview_exists": bool(blur_abs),
+            "blur_preview_filename": blur_rel,
+            "blur_preview_url": blur_url,
+            "item": {
+                **saved_item,
+                "char_id": char_id,
+                "file_exists": True,
+                "original_exists": True,
+                "original_relpath": orig_rel,
+                "media_url": f"/api/vault/media/{char_id}/{item_filename}",
+                "original_media_url": f"/api/vault/media/{char_id}/{item_filename}?version=original",
+                "blur_preview_exists": bool(blur_abs),
+                "blur_preview_url": blur_url,
+                **tx_stats,
+            },
         }
     )
 
@@ -709,6 +964,7 @@ def api_vault_delete():
         paths = get_char_paths(char_id)
         file_path = os.path.join(paths["vault_dir"], os.path.basename(target_item["filename"]))
         cleanup_blur_preview(file_path)
+        cleanup_original_backup(file_path)
         if os.path.isfile(file_path):
             try:
                 os.remove(file_path)
@@ -879,14 +1135,18 @@ def api_settings_save():
 def api_vault_media(char_id: str, filename: str):
     """
     ppv_vault 内の動画・画像ファイルを配信する（HTTP Range リクエスト 206 Partial Content 対応）。
+    `?version=original` 指定時は `originals/<filename>` に退避された加工前原本を配信し、
+    未指定時（デフォルト）は加工後ファイル（または previews/ ぼかし画像）を配信する。
     実ファイル未存在時はプレースホルダーSVGを返却する。
     """
-    safe_name, full_path, exists = resolve_vault_media_file(char_id, filename)
+    version = str(request.args.get("version") or "processed").strip().lower()
+    safe_name, full_path, exists = resolve_vault_media_file(char_id, filename, version=version)
     if exists and safe_name:
         ext = os.path.splitext(safe_name)[1].lower()
         mime_type = MIME_OVERRIDES.get(ext) or mimetypes.guess_type(safe_name)[0] or "application/octet-stream"
         file_size = os.path.getsize(full_path)
         range_header = request.headers.get("Range", "").strip()
+        cache_header = "no-store" if version == "original" else "public, max-age=60"
 
         if range_header and range_header.startswith("bytes="):
             m = re.match(r"bytes=(\d*)-(\d*)", range_header)
@@ -911,12 +1171,14 @@ def api_vault_media(char_id: str, filename: str):
                 resp.headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
                 resp.headers["Accept-Ranges"] = "bytes"
                 resp.headers["Content-Length"] = str(len(data))
-                resp.headers["Cache-Control"] = "public, max-age=60"
+                resp.headers["Cache-Control"] = cache_header
+                resp.headers["X-Media-Version"] = "original" if version == "original" else "processed"
                 return resp
 
         resp = send_file(full_path, mimetype=mime_type, conditional=True)
         resp.headers["Accept-Ranges"] = "bytes"
-        resp.headers["Cache-Control"] = "public, max-age=60"
+        resp.headers["Cache-Control"] = cache_header
+        resp.headers["X-Media-Version"] = "original" if version == "original" else "processed"
         return resp
 
     media_type = detect_media_type(safe_name)

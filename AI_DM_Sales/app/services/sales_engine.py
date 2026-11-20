@@ -18,6 +18,7 @@ from app.core.database import (
 from app.core.llm_client import LLMClient, llm_client
 from app.services.character_loader import (
     get_char_paths,
+    is_vault_item_sendable_to_customer,
     load_dm_persona,
     load_plans,
     load_settings,
@@ -990,7 +991,11 @@ class SalesEngine:
                 if pid:
                     excluded_ids.add(str(pid))
 
-        active_items = [it for it in all_vault if bool(it.get("is_active", True))]
+        active_items = [
+            it
+            for it in all_vault
+            if bool(it.get("is_active", True)) and is_vault_item_sendable_to_customer(char_id, it)
+        ]
         unpurchased = [
             it for it in active_items if str(it.get("ppv_id") or "") not in excluded_ids
         ]
