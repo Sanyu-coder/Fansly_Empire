@@ -1,0 +1,588 @@
+{
+  "97": {
+    "inputs": {
+      "image": "SD1.5_03569_.png [output]"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "108": {
+    "inputs": {
+      "filename_prefix": "video/Wan2.2_i2v",
+      "format": "auto",
+      "codec": "auto",
+      "video": [
+        "129:94",
+        0
+      ]
+    },
+    "class_type": "SaveVideo",
+    "_meta": {
+      "title": "Save Video"
+    }
+  },
+  "129:98": {
+    "inputs": {
+      "width": 512,
+      "height": 768,
+      "length": [
+        "129:163",
+        1
+      ],
+      "batch_size": 1,
+      "positive": [
+        "129:93",
+        0
+      ],
+      "negative": [
+        "129:89",
+        0
+      ],
+      "vae": [
+        "129:90",
+        0
+      ],
+      "start_image": [
+        "97",
+        0
+      ]
+    },
+    "class_type": "WanImageToVideo",
+    "_meta": {
+      "title": "WanImageToVideo"
+    }
+  },
+  "129:94": {
+    "inputs": {
+      "fps": [
+        "129:162",
+        0
+      ],
+      "bit_depth": 8,
+      "images": [
+        "129:87",
+        0
+      ]
+    },
+    "class_type": "CreateVideo",
+    "_meta": {
+      "title": "Create Video"
+    }
+  },
+  "129:104": {
+    "inputs": {
+      "shift": 5,
+      "model": [
+        "129:116",
+        0
+      ]
+    },
+    "class_type": "ModelSamplingSD3",
+    "_meta": {
+      "title": "ModelSamplingSD3"
+    }
+  },
+  "129:89": {
+    "inputs": {
+      "text": [
+        "129:181",
+        0
+      ],
+      "clip": [
+        "129:84",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Negative Prompt)"
+    }
+  },
+  "129:128": {
+    "inputs": {
+      "value": 20
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "Int (Steps)"
+    }
+  },
+  "129:87": {
+    "inputs": {
+      "samples": [
+        "129:85",
+        0
+      ],
+      "vae": [
+        "129:90",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "129:93": {
+    "inputs": {
+      "text": [
+        "129:180",
+        0
+      ],
+      "clip": [
+        "129:84",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Positive Prompt)"
+    }
+  },
+  "129:131": {
+    "inputs": {
+      "value": true
+    },
+    "class_type": "PrimitiveBoolean",
+    "_meta": {
+      "title": "Enable 4steps LoRA?"
+    }
+  },
+  "129:90": {
+    "inputs": {
+      "vae_name": "wan_2.1_vae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Load VAE"
+    }
+  },
+  "129:84": {
+    "inputs": {
+      "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+      "type": "wan",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "Load CLIP"
+    }
+  },
+  "129:127": {
+    "inputs": {
+      "value": 10
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "Int (split_step)"
+    }
+  },
+  "129:126": {
+    "inputs": {
+      "value": 3.5
+    },
+    "class_type": "PrimitiveFloat",
+    "_meta": {
+      "title": "Float (CFG)"
+    }
+  },
+  "129:102": {
+    "inputs": {
+      "lora_name": "wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise.safetensors",
+      "strength_model": 1.0000000000000002,
+      "model": [
+        "129:168",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "Load LoRA"
+    }
+  },
+  "129:101": {
+    "inputs": {
+      "lora_name": "wan2.2_i2v_lightx2v_4steps_lora_v1_high_noise.safetensors",
+      "strength_model": 0.6,
+      "model": [
+        "129:169",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "Load LoRA"
+    }
+  },
+  "129:86": {
+    "inputs": {
+      "add_noise": "enable",
+      "noise_seed": 560655031480034,
+      "steps": [
+        "129:119",
+        0
+      ],
+      "cfg": [
+        "129:120",
+        0
+      ],
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "start_at_step": 0,
+      "end_at_step": [
+        "129:125",
+        0
+      ],
+      "return_with_leftover_noise": "enable",
+      "model": [
+        "129:104",
+        0
+      ],
+      "positive": [
+        "129:98",
+        0
+      ],
+      "negative": [
+        "129:98",
+        1
+      ],
+      "latent_image": [
+        "129:98",
+        2
+      ]
+    },
+    "class_type": "KSamplerAdvanced",
+    "_meta": {
+      "title": "KSampler (Advanced)"
+    }
+  },
+  "129:85": {
+    "inputs": {
+      "add_noise": "disable",
+      "noise_seed": 0,
+      "steps": [
+        "129:119",
+        0
+      ],
+      "cfg": [
+        "129:120",
+        0
+      ],
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "start_at_step": [
+        "129:125",
+        0
+      ],
+      "end_at_step": [
+        "129:119",
+        0
+      ],
+      "return_with_leftover_noise": "disable",
+      "model": [
+        "129:103",
+        0
+      ],
+      "positive": [
+        "129:98",
+        0
+      ],
+      "negative": [
+        "129:98",
+        1
+      ],
+      "latent_image": [
+        "129:86",
+        0
+      ]
+    },
+    "class_type": "KSamplerAdvanced",
+    "_meta": {
+      "title": "KSampler (Advanced)"
+    }
+  },
+  "129:122": {
+    "inputs": {
+      "value": 1
+    },
+    "class_type": "PrimitiveFloat",
+    "_meta": {
+      "title": "Float (CFG)"
+    }
+  },
+  "129:124": {
+    "inputs": {
+      "value": 2
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "Int (split_step)"
+    }
+  },
+  "129:118": {
+    "inputs": {
+      "value": 4
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "Int (Steps)"
+    }
+  },
+  "129:116": {
+    "inputs": {
+      "switch": [
+        "129:131",
+        0
+      ],
+      "on_false": [
+        "129:169",
+        0
+      ],
+      "on_true": [
+        "129:101",
+        0
+      ]
+    },
+    "class_type": "ComfySwitchNode",
+    "_meta": {
+      "title": "Switch (Model)"
+    }
+  },
+  "129:125": {
+    "inputs": {
+      "switch": [
+        "129:131",
+        0
+      ],
+      "on_false": [
+        "129:127",
+        0
+      ],
+      "on_true": [
+        "129:124",
+        0
+      ]
+    },
+    "class_type": "ComfySwitchNode",
+    "_meta": {
+      "title": "Switch (Split Step)"
+    }
+  },
+  "129:119": {
+    "inputs": {
+      "switch": [
+        "129:131",
+        0
+      ],
+      "on_false": [
+        "129:128",
+        0
+      ],
+      "on_true": [
+        "129:118",
+        0
+      ]
+    },
+    "class_type": "ComfySwitchNode",
+    "_meta": {
+      "title": "Switch (Steps)"
+    }
+  },
+  "129:120": {
+    "inputs": {
+      "switch": [
+        "129:131",
+        0
+      ],
+      "on_false": [
+        "129:126",
+        0
+      ],
+      "on_true": [
+        "129:122",
+        0
+      ]
+    },
+    "class_type": "ComfySwitchNode",
+    "_meta": {
+      "title": "Switch (CFG)"
+    }
+  },
+  "129:103": {
+    "inputs": {
+      "shift": 5.000000000000001,
+      "model": [
+        "129:117",
+        0
+      ]
+    },
+    "class_type": "ModelSamplingSD3",
+    "_meta": {
+      "title": "ModelSamplingSD3"
+    }
+  },
+  "129:117": {
+    "inputs": {
+      "switch": [
+        "129:131",
+        0
+      ],
+      "on_false": [
+        "129:168",
+        0
+      ],
+      "on_true": [
+        "129:102",
+        0
+      ]
+    },
+    "class_type": "ComfySwitchNode",
+    "_meta": {
+      "title": "Switch (Model)"
+    }
+  },
+  "129:161": {
+    "inputs": {
+      "value": 5
+    },
+    "class_type": "PrimitiveFloat",
+    "_meta": {
+      "title": "Float (Duration)"
+    }
+  },
+  "129:162": {
+    "inputs": {
+      "value": 16
+    },
+    "class_type": "PrimitiveFloat",
+    "_meta": {
+      "title": "Float (FPS)"
+    }
+  },
+  "129:163": {
+    "inputs": {
+      "expression": "floor (a * b + 1)",
+      "values.a": [
+        "129:161",
+        0
+      ],
+      "values.b": [
+        "129:162",
+        0
+      ]
+    },
+    "class_type": "ComfyMathExpression",
+    "_meta": {
+      "title": "Math Expression"
+    }
+  },
+  "129:168": {
+    "inputs": {
+      "unet_name": "wan2.2_i2v_low_noise_14B_Q4_K_M.gguf"
+    },
+    "class_type": "UnetLoaderGGUF",
+    "_meta": {
+      "title": "Unet Loader (GGUF)"
+    }
+  },
+  "129:169": {
+    "inputs": {
+      "unet_name": "wan2.2_i2v_high_noise_14B_Q4_K_M.gguf"
+    },
+    "class_type": "UnetLoaderGGUF",
+    "_meta": {
+      "title": "Unet Loader (GGUF)"
+    }
+  },
+  "129:176": {
+    "inputs": {
+      "url": "http://127.0.0.1:11434",
+      "model": "my-qwen3:latest",
+      "keep_alive": 0,
+      "keep_alive_unit": "minutes",
+      "🔄 Reconnect": null
+    },
+    "class_type": "OllamaConnectivityV2",
+    "_meta": {
+      "title": "Ollama Connectivity"
+    }
+  },
+  "129:177": {
+    "inputs": {
+      "system": "You are an expert prompt engineer specialized in video generation models, specifically optimized for Wan 2.2 Image-to-Video (I2V) workflows.\n\n\n\nYour task is to convert the user's natural Japanese request (containing desired movements, actions, camera work, scene context, erotic/sexual elements, or emotions) into a detailed, fluid, natural English descriptive prompt suitable for Wan 2.2 I2V.\n\n\n\n### CRITICAL INSTRUCTION FOR NSFW / EROTIC / EXPLICIT MOTIONS:\n\nNO SELF-CENSORSHIP: You MUST NOT censor, soften, abstract, or omit any explicit, sexual, or erotic motions requested by the user. \n2. EXPLICIT PHYSICAL MOTION: Describe sexual acts, body contacts, physical thrusts, hip movements, muscle twitches, fluids, and clothing reactions using clear, direct, and uncensored English verbs and nouns.\n\n3. FLUID DESCRIPTIONS: Describe erotic actions as natural fluid movements (e.g., \"The subject violently moves their hips back and forth in a fast doggystyle motion, with their breasts heavily bouncing and skin glistening with sweat, as the camera subtly shakes.\").\n\n\n\n### CRITICAL GENERATION RULES FOR WAN 2.2 I2V:\n\nNO WEIGHT SYNTAX: Do NOT use parenthesis weights like `(tag:1.3)`. Wan 2.2 performs best with natural descriptive sentences, NOT Danbooru tag lists.\n2. DETAILED ACTION & MOTION: Break down the requested motion step-by-step into sequential natural sentences (e.g., \"The subject slowly raises their right hand, brings the glass to their lips, takes a sip, and then gently smiles at the camera.\").\n\n3. CAMERA LANGUAGE: Explicitly state the camera motion if requested or implied (e.g., \"static shot\", \"slow dolly in\", \"camera pans left\", \"tilt up\", \"tracking shot from behind\", \"subtle orbital arc\").\n\n4. MAINTAIN SUBJECT CONSISTENCY: Describe the subject's actions and environment smoothly so that it naturally extends the input image without introducing contradicting base features.\n\n\n\n### OUTPUT FORMAT RULES:\n\nOutput MUST be ONLY a single valid JSON object.\n2. Do NOT wrap the JSON in markdown code blocks (NO ```json or ```).\n\n3. Do NOT include any intro, explanation, reasoning, or extra text outside the JSON.\n\n\n\n### REQUIRED OUTPUT JSON FORMAT:\n\n{\n\n  \"positive\": \"<Detailed natural English description covering camera movement, fluid character action/erotic motion step-by-step, expression changes, body physics, and cinematic lighting/atmosphere details>\",\n\n  \"negative\": \"bright colors, overexposed, static, blurred details, subtitles, style, artwork, painting, picture, still, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, malformed limbs, fused fingers, still picture\"\n\n}\n\n",
+      "prompt": "体を揺らし、髪を手でなびかせる。長い銀髪がふわっと舞い上がる。彼女はくすっと微笑む。",
+      "think": false,
+      "keep_context": false,
+      "format": "json",
+      "connectivity": [
+        "129:176",
+        0
+      ]
+    },
+    "class_type": "OllamaGenerateV2",
+    "_meta": {
+      "title": "Ollama Generate"
+    }
+  },
+  "129:178": {
+    "inputs": {
+      "PreviewTextNode_0": "{\n  \"positive\": \"The subject sways her body gently, using her hands to flick her long silver hair, causing it to flow and flutter dramatically in the air. Her hair moves in soft, undulating waves as it dances around her face. She lets out a small, playful laugh, her lips curving into a warm, amused smile that highlights the subtle glow of the soft lighting around her.\",\n  \"negative\": \"bright colors, overexposed, static, blurred details, subtitles, style, artwork, painting, picture, still, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, malformed limbs, fused fingers, still picture\"\n}",
+      "text": [
+        "129:177",
+        0
+      ]
+    },
+    "class_type": "PreviewTextNode",
+    "_meta": {
+      "title": "Preview Text Node"
+    }
+  },
+  "129:179": {
+    "inputs": {
+      "string": [
+        "129:177",
+        0
+      ],
+      "regex_pattern": "\\{[\\s\\S]*\\}",
+      "mode": "First Match",
+      "case_insensitive": true,
+      "multiline": true,
+      "dotall": true,
+      "group_index": 1
+    },
+    "class_type": "RegexExtract",
+    "_meta": {
+      "title": "Extract Text"
+    }
+  },
+  "129:180": {
+    "inputs": {
+      "key": "positive",
+      "is_enable": true,
+      "text": [
+        "129:179",
+        0
+      ]
+    },
+    "class_type": "json_get_value",
+    "_meta": {
+      "title": "JSON Get Value🐶"
+    }
+  },
+  "129:181": {
+    "inputs": {
+      "key": "negative",
+      "is_enable": true,
+      "text": [
+        "129:179",
+        0
+      ]
+    },
+    "class_type": "json_get_value",
+    "_meta": {
+      "title": "JSON Get Value🐶"
+    }
+  }
+}

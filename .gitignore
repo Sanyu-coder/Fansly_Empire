@@ -47,3 +47,19 @@ AI_Factory/characters/
 *.jpg
 *.jpeg
 *.webp
+
+# Secrets & API Keys
+.env
+.env.*
+*.key
+*.pem
+credentials*.json
+
+# Backups, Outputs & Chrome Profile
+output/
+outputs/
+backup/
+**/.chrome_profile/
+**/browser_profile/
+*.sqlite
+*.sqlite3

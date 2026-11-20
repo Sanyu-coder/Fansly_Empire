@@ -1,0 +1,49 @@
+# 生成物・大容量出力フォルダ
+output/
+outputs/
+backup/
+characters/*/01_candidates/
+characters/*/02_ready_to_post/
+characters/*/03_posted/
+characters/*/99_rejected/
+characters/*/browser_profile/
+characters/*/logs/
+.chrome_profile/
+
+# 大容量メディアファイル（動画・音声など）
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.webm
+*.flv
+*.wmv
+*.wav
+*.mp3
+*.flac
+
+# Python キャッシュ・仮想環境
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+env/
+.pytest_cache/
+
+# 環境変数・機密情報・ローカル実行時設定
+.env
+.env.local
+app_settings.json
+
+# OS・エディタ関連
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*.swo
+
+# すべてのfinal_post.jsonを除外
+**/final_post.json

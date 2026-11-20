@@ -1,0 +1,164 @@
+{
+  "1": {
+    "inputs": {
+      "image": "SD1.5_02416_.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "16": {
+    "inputs": {
+      "filename_prefix": "Mosaic",
+      "format": "png",
+      "format.bit_depth": "8-bit",
+      "format.input_color_space": "sRGB",
+      "images": [
+        "19:12",
+        0
+      ]
+    },
+    "class_type": "SaveImageAdvanced",
+    "_meta": {
+      "title": "Save Image (Advanced)"
+    }
+  },
+  "20": {
+    "inputs": {
+      "key": "negative",
+      "is_enable": true
+    },
+    "class_type": "json_get_value",
+    "_meta": {
+      "title": "JSON Get Value🐶"
+    }
+  },
+  "28": {
+    "inputs": {
+      "mode": "single_image",
+      "seed": 813019424050119,
+      "index": 15,
+      "label": "Batch 001",
+      "path": "C:\\ComfyUI\\ConfyUI ショートカット\\投稿準備フォルダ\\2026-09-17\\シルフィ",
+      "pattern": "*",
+      "allow_RGBA_output": "false",
+      "filename_text_extension": "true"
+    },
+    "class_type": "Load Image Batch",
+    "_meta": {
+      "title": "Load Image Batch"
+    }
+  },
+  "19:14": {
+    "inputs": {
+      "upscale_method": "nearest-exact",
+      "width": 80,
+      "height": 120,
+      "crop": "disabled",
+      "image": [
+        "1",
+        0
+      ]
+    },
+    "class_type": "ImageScale",
+    "_meta": {
+      "title": "Downscale Image"
+    }
+  },
+  "19:18": {
+    "inputs": {
+      "model_name": "bbox/yolo11_nsfw.pt"
+    },
+    "class_type": "UltralyticsDetectorProvider",
+    "_meta": {
+      "title": "UltralyticsDetectorProvider"
+    }
+  },
+  "19:9": {
+    "inputs": {
+      "threshold": 0.2,
+      "dilation": 3,
+      "crop_factor": 3,
+      "drop_size": 1,
+      "labels": "vulva,penis,anal,vaginal",
+      "bbox_detector": [
+        "19:18",
+        0
+      ],
+      "image": [
+        "1",
+        0
+      ]
+    },
+    "class_type": "BboxDetectorSEGS",
+    "_meta": {
+      "title": "BBOX Detector (SEGS)"
+    }
+  },
+  "19:10": {
+    "inputs": {
+      "segs": [
+        "19:9",
+        0
+      ]
+    },
+    "class_type": "SegsToCombinedMask",
+    "_meta": {
+      "title": "SEGS to MASK (combined)"
+    }
+  },
+  "19:12": {
+    "inputs": {
+      "x": 0,
+      "y": 0,
+      "resize_source": false,
+      "destination": [
+        "1",
+        0
+      ],
+      "source": [
+        "19:13",
+        0
+      ],
+      "mask": [
+        "19:11",
+        0
+      ]
+    },
+    "class_type": "ImageCompositeMasked",
+    "_meta": {
+      "title": "Image Composite Masked"
+    }
+  },
+  "19:11": {
+    "inputs": {
+      "kernel_size": 10,
+      "sigma": 10,
+      "mask": [
+        "19:10",
+        0
+      ]
+    },
+    "class_type": "ImpactGaussianBlurMask",
+    "_meta": {
+      "title": "Gaussian Blur Mask"
+    }
+  },
+  "19:13": {
+    "inputs": {
+      "upscale_method": "nearest-exact",
+      "width": 512,
+      "height": 768,
+      "crop": "disabled",
+      "image": [
+        "19:14",
+        0
+      ]
+    },
+    "class_type": "ImageScale",
+    "_meta": {
+      "title": "Upscale Image"
+    }
+  }
+}

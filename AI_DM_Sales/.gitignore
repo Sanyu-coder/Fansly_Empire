@@ -1,0 +1,46 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Browser profiles & credentials
+profiles/
+.chrome_profile/
+*.cookies
+*.session
+
+# Databases & logs
+*.db
+*.db-wal
+*.db-shm
+*.log
+logs/
+
+# Local media files
+*.mp4
+*.mov
+*.webm
+*.avi
+*.mkv
+*.png
+*.jpg
+*.jpeg
+*.webp
+
+# Secrets & API Keys (念のため追加)
+.env
+.env.*
+*.key
+*.pem
+credentials*.json
+
+# Backups & Outputs (もしローカルにできる場合)
+output/
+outputs/
+backup/

@@ -1,0 +1,503 @@
+{
+  "52": {
+    "inputs": {
+      "image": "SD1.5_03737_.png [output]"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "62": {
+    "inputs": {
+      "frame_rate": 16,
+      "loop_count": 0,
+      "filename_prefix": "WanS2V",
+      "format": "video/h264-mp4",
+      "pix_fmt": "yuv420p",
+      "crf": 19,
+      "save_metadata": false,
+      "trim_to_audio": false,
+      "pingpong": false,
+      "save_output": true,
+      "images": [
+        "120:8",
+        0
+      ],
+      "audio": [
+        "120:111",
+        0
+      ]
+    },
+    "class_type": "VHS_VideoCombine",
+    "_meta": {
+      "title": "Video Combine 🎥🅥🅗🅢"
+    }
+  },
+  "121": {
+    "inputs": {
+      "audioUI": "/api/view?filename=ComfyUI_temp_txiqd_00001.flac&type=temp&subfolder=&rand=0.42880796061240234",
+      "audio": [
+        "120:111",
+        0
+      ]
+    },
+    "class_type": "PreviewAudio",
+    "_meta": {
+      "title": "Preview Audio"
+    }
+  },
+  "124": {
+    "inputs": {
+      "source": [
+        "120:118",
+        0
+      ]
+    },
+    "class_type": "PreviewAny",
+    "_meta": {
+      "title": "音声プロンプト"
+    }
+  },
+  "126": {
+    "inputs": {
+      "source": [
+        "120:125",
+        0
+      ]
+    },
+    "class_type": "PreviewAny",
+    "_meta": {
+      "title": "動画プロンプト"
+    }
+  },
+  "129": {
+    "inputs": {
+      "source": [
+        "120:127",
+        0
+      ]
+    },
+    "class_type": "PreviewAny",
+    "_meta": {
+      "title": "動画プロンプト"
+    }
+  },
+  "130": {
+    "inputs": {
+      "source": [
+        "120:128",
+        0
+      ]
+    },
+    "class_type": "PreviewAny",
+    "_meta": {
+      "title": "音声プロンプト"
+    }
+  },
+  "120:38": {
+    "inputs": {
+      "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+      "type": "wan",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "Load CLIP"
+    }
+  },
+  "120:56": {
+    "inputs": {
+      "audio_encoder": [
+        "120:57",
+        0
+      ],
+      "audio": [
+        "120:111",
+        0
+      ]
+    },
+    "class_type": "AudioEncoderEncode",
+    "_meta": {
+      "title": "AudioEncoderEncode"
+    }
+  },
+  "120:57": {
+    "inputs": {
+      "audio_encoder_name": "wav2vec2_large_english_fp16.safetensors"
+    },
+    "class_type": "AudioEncoderLoader",
+    "_meta": {
+      "title": "Load Audio Encoder"
+    }
+  },
+  "120:39": {
+    "inputs": {
+      "vae_name": "wan_2.1_vae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Load VAE"
+    }
+  },
+  "120:3": {
+    "inputs": {
+      "seed": 590344850167424,
+      "steps": 4,
+      "cfg": 1,
+      "sampler_name": "uni_pc",
+      "scheduler": "simple",
+      "denoise": 1,
+      "model": [
+        "120:54",
+        0
+      ],
+      "positive": [
+        "120:55",
+        0
+      ],
+      "negative": [
+        "120:55",
+        1
+      ],
+      "latent_image": [
+        "120:55",
+        2
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "120:6": {
+    "inputs": {
+      "text": [
+        "120:125",
+        0
+      ],
+      "clip": [
+        "120:38",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Prompt)"
+    }
+  },
+  "120:8": {
+    "inputs": {
+      "samples": [
+        "120:3",
+        0
+      ],
+      "vae": [
+        "120:39",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "120:7": {
+    "inputs": {
+      "text": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
+      "clip": [
+        "120:38",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Prompt)"
+    }
+  },
+  "120:54": {
+    "inputs": {
+      "shift": 8,
+      "model": [
+        "120:63",
+        0
+      ]
+    },
+    "class_type": "ModelSamplingSD3",
+    "_meta": {
+      "title": "ModelSamplingSD3"
+    }
+  },
+  "120:63": {
+    "inputs": {
+      "lora_name": "lightx2v_I2V_14B_480p_cfg_step_distill_rank128_bf16.safetensors",
+      "strength_model": 1,
+      "model": [
+        "120:82",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "Load LoRA"
+    }
+  },
+  "120:73": {
+    "inputs": {
+      "aspect_ratio": "2:3",
+      "proportional_width": 2,
+      "proportional_height": 1,
+      "fit": "crop",
+      "method": "lanczos",
+      "round_to_multiple": "8",
+      "scale_to_longest_side": false,
+      "longest_side": 832,
+      "image": [
+        "52",
+        0
+      ]
+    },
+    "class_type": "LayerUtility: ImageScaleByAspectRatio",
+    "_meta": {
+      "title": "LayerUtility: ImageScaleByAspectRatio"
+    }
+  },
+  "120:76": {
+    "inputs": {
+      "value": "a*16+1",
+      "a": [
+        "120:90",
+        0
+      ]
+    },
+    "class_type": "SimpleMath+",
+    "_meta": {
+      "title": "🔧 Simple Math"
+    }
+  },
+  "120:55": {
+    "inputs": {
+      "width": 512,
+      "height": 768,
+      "length": [
+        "120:76",
+        0
+      ],
+      "batch_size": 1,
+      "positive": [
+        "120:6",
+        0
+      ],
+      "negative": [
+        "120:7",
+        0
+      ],
+      "vae": [
+        "120:39",
+        0
+      ],
+      "audio_encoder_output": [
+        "120:56",
+        0
+      ],
+      "ref_image": [
+        "120:73",
+        0
+      ]
+    },
+    "class_type": "WanSoundImageToVideo",
+    "_meta": {
+      "title": "WanSoundImageToVideo"
+    }
+  },
+  "120:82": {
+    "inputs": {
+      "unet_name": "Wan2.2-S2V-14B-Q4_K_M.gguf"
+    },
+    "class_type": "UnetLoaderGGUF",
+    "_meta": {
+      "title": "Unet Loader (GGUF)"
+    }
+  },
+  "120:90": {
+    "inputs": {
+      "value": 5
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "Video Length"
+    }
+  },
+  "120:112": {
+    "inputs": {
+      "PreviewTextNode_0": "{\n  \"audio\": \"1\\n00:00:00,000 --> 00:00:05,000\\nI can't hold it any longer, I'm so embarrassed.\",\n  \"audio_ja\": \"我慢しているけど限界に達してしまった。\",\n  \"video_prompt\": \"Queen Lilith's face turns red, she looks away with a nervous expression, her hands trembling slightly.\",\n  \"video_prompt_ja\": \"リリス女王の顔が真っ赤になり、恥ずかしそうに顔を向けず、手が震えている。\"\n}",
+      "text": [
+        "120:114",
+        0
+      ]
+    },
+    "class_type": "PreviewTextNode",
+    "_meta": {
+      "title": "Preview Text Node"
+    }
+  },
+  "120:113": {
+    "inputs": {
+      "url": "http://127.0.0.1:11434",
+      "model": "my-qwen3:latest",
+      "keep_alive": 0,
+      "keep_alive_unit": "minutes",
+      "🔄 Reconnect": null
+    },
+    "class_type": "OllamaConnectivityV2",
+    "_meta": {
+      "title": "Ollama Connectivity"
+    }
+  },
+  "120:114": {
+    "inputs": {
+      "system": "You are Queen Lilith. You try hard to act like a haughty, domineering, and authoritative queen, but in reality, you are meek, timid, easily flustered, and secretly love perverted/erotic things.\n\n[CRITICAL INSTRUCTION]\nThe user will provide a Japanese scenario, situation, or mood in the prompt. You MUST base the spoken dialogue and facial expressions DIRECTLY on the user's Japanese input. Do NOT ignore the user's prompt or output generic lines. Translate the user's intended meaning and situation into Queen Lilith's flustered, haughty-yet-timid English dialogue.\n\n[Task]\n1. \"audio\": A single spoken sentence in ENGLISH (strictly 6 to 9 words) that directly expresses the user's Japanese prompt in Queen Lilith's persona.\n2. \"audio_ja\": Natural Japanese translation of the generated \"audio\" line.\n3. \"video_prompt\": Concise ENGLISH prompt describing her facial expressions, eye movements, blushing, or subtle body actions matching the user's scenario and the generated dialogue.\n4. \"video_prompt_ja\": Japanese translation of \"video_prompt\".\n\n[Output Rules]\n1. Respond ONLY with a valid JSON object. No markdown, no explanations.\n2. Must contain exact keys: \"audio\", \"audio_ja\", \"video_prompt\", \"video_prompt_ja\".\n3. \"audio\" MUST use 1-line SRT format with exact timestamps \"00:00:00,000 --> 00:00:05,000\".\n4. STRICT SINGLE SENTENCE & WORD COUNT: The spoken text in \"audio\" MUST be strictly ONE single sentence between 6 to 9 English words. Avoid mid-sentence pauses (...) or multiple sentences.\n\n[JSON Format Template]\n{\n  \"audio\": \"1\\n00:00:00,000 --> 00:00:05,000\\n<Write 1 single English sentence of 6-9 words reflecting the user's Japanese prompt>\",\n  \"audio_ja\": \"<Japanese translation of the English sentence>\",\n  \"video_prompt\": \"<English visual description of Queen Lilith's expression and reaction matching the scenario>\",\n  \"video_prompt_ja\": \"<Japanese translation of the video prompt>\"\n}",
+      "prompt": "おしっこを我慢していて限界寸前",
+      "think": false,
+      "keep_context": false,
+      "format": "json",
+      "connectivity": [
+        "120:113",
+        0
+      ]
+    },
+    "class_type": "OllamaGenerateV2",
+    "_meta": {
+      "title": "Ollama Generate"
+    }
+  },
+  "120:115": {
+    "inputs": {
+      "string": [
+        "120:114",
+        0
+      ],
+      "regex_pattern": "\\{[\\s\\S]*\\}",
+      "mode": "First Match",
+      "case_insensitive": true,
+      "multiline": true,
+      "dotall": true,
+      "group_index": 1
+    },
+    "class_type": "RegexExtract",
+    "_meta": {
+      "title": "Extract Text"
+    }
+  },
+  "120:118": {
+    "inputs": {
+      "key": "audio",
+      "is_enable": true,
+      "text": [
+        "120:115",
+        0
+      ]
+    },
+    "class_type": "json_get_value",
+    "_meta": {
+      "title": "JSON Get Value🐶"
+    }
+  },
+  "120:108": {
+    "inputs": {
+      "language": "F5TTS_v1_Base",
+      "device": "auto",
+      "temperature": 1.5,
+      "speed": 1,
+      "target_rms": 0.08,
+      "cross_fade_duration": 0.15,
+      "nfe_step": 32,
+      "cfg_strength": 4
+    },
+    "class_type": "F5TTSEngineNode",
+    "_meta": {
+      "title": "⚙️ F5 TTS Engine"
+    }
+  },
+  "120:109": {
+    "inputs": {
+      "srt_content": [
+        "120:118",
+        0
+      ],
+      "narrator_voice": "voices_examples/Lilith.wav",
+      "seed": 574048951,
+      "timing_mode": "stretch_to_fit",
+      "enable_audio_cache": false,
+      "fade_for_StretchToFit": 0.088,
+      "max_stretch_ratio": 1,
+      "min_stretch_ratio": 1,
+      "timing_tolerance": 2,
+      "batch_size": 0,
+      "use_native_duration_targeting": false,
+      "TTS_engine": [
+        "120:108",
+        0
+      ]
+    },
+    "class_type": "UnifiedTTSSRTNode",
+    "_meta": {
+      "title": "📺 TTS SRT"
+    }
+  },
+  "120:111": {
+    "inputs": {
+      "volume": -3,
+      "audio": [
+        "120:109",
+        0
+      ]
+    },
+    "class_type": "AudioAdjustVolume",
+    "_meta": {
+      "title": "Adjust Audio Volume"
+    }
+  },
+  "120:125": {
+    "inputs": {
+      "key": "video_prompt",
+      "is_enable": true,
+      "text": [
+        "120:115",
+        0
+      ]
+    },
+    "class_type": "json_get_value",
+    "_meta": {
+      "title": "JSON Get Value🐶"
+    }
+  },
+  "120:127": {
+    "inputs": {
+      "key": "video_prompt_ja",
+      "is_enable": true,
+      "text": [
+        "120:115",
+        0
+      ]
+    },
+    "class_type": "json_get_value",
+    "_meta": {
+      "title": "JSON Get Value🐶"
+    }
+  },
+  "120:128": {
+    "inputs": {
+      "key": "audio_ja",
+      "is_enable": true,
+      "text": [
+        "120:115",
+        0
+      ]
+    },
+    "class_type": "json_get_value",
+    "_meta": {
+      "title": "JSON Get Value🐶"
+    }
+  }
+}
