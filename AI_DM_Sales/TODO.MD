@@ -41,7 +41,7 @@
 
 ---
 
-### - [ ] TICKET-04: [新機能追加] DM受信時の即時AIドラフト先行生成バックエンド実装 【実行モデル：local-long (Qwen 3.6 128K)】
+### - [x] TICKET-04: [新機能追加] DM受信時の即時AIドラフト先行生成バックエンド実装 【実行モデル：local-long (Qwen 3.6 128K)】
 - **対象ファイル（確定）**
   - `app/services/fansly_dm_bot.py`（3043行）
   - `app/routes/dashboard.py`（1148行）

@@ -309,6 +309,8 @@ def api_monitoring_poll():
                         update_dm_message_ja(int(m["msg_id"]), ja_text)
             pending_map = bot_manager.get_pending_replies(char_id=active_char_id, fan_id=active_fan_id)
             detail["pending_reply"] = pending_map.get(f"{active_char_id}::{active_fan_id}")
+            # TICKET-04: 送信予定ドラフト（AI返信EN/JA・PPV・残り待機秒数）をトップレベルで露出
+            detail["pending_draft"] = (detail.get("pending_reply") or {}).get("pending_draft")
             active_thread = detail
 
     return jsonify(
@@ -349,6 +351,8 @@ def api_monitoring_thread():
 
     pending_map = bot_manager.get_pending_replies(char_id=char_id, fan_id=fan_id)
     detail["pending_reply"] = pending_map.get(f"{char_id}::{fan_id}")
+    # TICKET-04: 送信予定ドラフト（AI返信EN/JA・PPV・残り待機秒数）をトップレベルで露出
+    detail["pending_draft"] = (detail.get("pending_reply") or {}).get("pending_draft")
     if "decision_logs" not in detail:
         fan_obj = detail.get("fan") or {}
         detail["decision_logs"] = fan_obj.get("decision_logs") or []

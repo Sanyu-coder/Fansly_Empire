@@ -683,6 +683,32 @@ class CharacterBotWorker:
                 if entry["cancel_event"].is_set():
                     continue
                 rem = max(0, int(round(float(entry["scheduled_ts"]) - now_ts)))
+                # TICKET-04: 送信予定ドラフト（DM受信検知時点で先行生成済みのAI返信・PPV・残り待機秒数）
+                # 送信完了時は _pending_replies からエントリが pop されるため pending_draft も自動でクリアされる。
+                draft_ppv = None
+                sel_ppv = entry.get("selected_ppv")
+                if isinstance(sel_ppv, dict) and sel_ppv.get("ppv_id"):
+                    draft_fname = os.path.basename(str(sel_ppv.get("filename") or "").replace("\\", "/").strip())
+                    draft_step = int(sel_ppv.get("ladder_step") or 1)
+                    draft_ppv = {
+                        "ppv_id": sel_ppv.get("ppv_id"),
+                        "char_id": self.char_id,
+                        "filename": draft_fname or sel_ppv.get("ppv_id"),
+                        "media_type": sel_ppv.get("media_type") or "video",
+                        "media_url": f"/api/vault/media/{self.char_id}/{draft_fname}" if draft_fname else "",
+                        "step_label": sel_ppv.get("step_label") or f"Step {draft_step}",
+                        "ladder_step": draft_step,
+                        "offered_price_usd": round(float(sel_ppv.get("offered_price_usd") or sel_ppv.get("base_price_usd") or 9.99), 2),
+                        "is_unlocked": 0,
+                    }
+                pending_draft = {
+                    "ai_en": str(entry.get("ai_en") or ""),
+                    "ai_ja": str(entry.get("ai_ja") or ""),
+                    "ppv": draft_ppv,
+                    "remaining_seconds": rem,
+                    "scheduled_time_hms": entry.get("scheduled_time_hms", ""),
+                    "total_delay_sec": entry.get("total_delay_sec", 0),
+                }
                 out[fid] = {
                     "char_id": self.char_id,
                     "fan_id": fid,
@@ -695,6 +721,7 @@ class CharacterBotWorker:
                     "retry_count": int(entry.get("retry_count") or 0),
                     "ai_preview_en": str(entry.get("ai_en") or "")[:160],
                     "ai_preview_ja": str(entry.get("ai_ja") or "")[:160],
+                    "pending_draft": pending_draft,
                 }
             return out
 
