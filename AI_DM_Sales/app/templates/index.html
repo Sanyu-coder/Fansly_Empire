@@ -1263,6 +1263,34 @@
       .redact-modal-body { flex-direction: column; }
       .redact-side-pane { width: 100%; border-left: none; border-top: 1px solid var(--border); max-height: 40%; }
     }
+    /* [TICKET-06] 送信予定ドラフト・待機中プレビュー */
+    .pending-draft-bubble {
+      max-width: 85%;
+      align-self: flex-end;
+      padding: 8px 12px 10px 12px;
+      border-radius: 10px;
+      border: 1.5px dashed rgba(251, 191, 36, 0.65);
+      background: rgba(251, 191, 36, 0.08);
+      font-size: 12.5px;
+      line-height: 1.45;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      opacity: 0.88;
+    }
+    .pending-draft-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      background: rgba(251, 191, 36, 0.18);
+      border: 1px solid rgba(251, 191, 36, 0.55);
+      color: #fde68a;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 999px;
+      width: fit-content;
+    }
   </style>
 </head>
 <body>
@@ -2290,7 +2318,16 @@
       if (!state.activePendingReply || !state.activePendingReply.is_waiting) return;
       if (typeof state.activePendingReply.remaining_seconds === "number" && state.activePendingReply.remaining_seconds > 0) {
         state.activePendingReply.remaining_seconds = Math.max(0, state.activePendingReply.remaining_seconds - 1);
+        const draft = state.activePendingReply.pending_draft;
+        if (draft && typeof draft.remaining_seconds === "number" && draft.remaining_seconds > 0) {
+          draft.remaining_seconds = Math.max(0, draft.remaining_seconds - 1);
+        }
         renderReplyStatusBanner(state.activeFanState, state.activePendingReply);
+        // [TICKET-06] チャット内ドラフトバッジの残り秒数を実時間更新
+        const badge = document.getElementById("pendingDraftBadge");
+        if (badge && draft) {
+          badge.textContent = `⏳ 送信予定（残り${Math.max(0, Math.floor(Number(draft.remaining_seconds || 0)))}秒）`;
+        }
       }
     }
 
@@ -2924,6 +2961,14 @@
               </div>
             `;
           }).join("");
+          // [TICKET-06] 待機中の送信予定ドラフトをチャット最下部にプレビュー表示
+          const pendingDraft = data.pending_draft || (pendingReply && pendingReply.pending_draft) || null;
+          if (pendingDraft && (pendingDraft.ai_en || pendingDraft.ai_ja || pendingDraft.ppv)) {
+            chatBox.innerHTML += renderPendingDraftPreviewHtml(pendingDraft);
+          } else {
+            const oldDraft = chatBox.querySelector(".pending-draft-bubble");
+            if (oldDraft) oldDraft.remove();
+          }
           if (!isBackgroundPoll || !prevSig || wasNearBottom) {
             chatBox.scrollTop = chatBox.scrollHeight;
           }
@@ -4975,6 +5020,29 @@
     function closeManualViewerModal() {
       const modal = document.getElementById("manualViewerModal");
       if (modal) modal.classList.remove("open");
+    }
+
+    /* [TICKET-06] 送信予定ドラフト・待機中プレビュー描画ヘルパー */
+    function renderPendingDraftPreviewHtml(draft) {
+      if (!draft || !draft.ai_en && !draft.ai_ja && !draft.ppv) return "";
+      const sec = Math.max(0, Math.floor(Number(draft.remaining_seconds || 0)));
+      const hms = draft.scheduled_time_hms || "--:--:--";
+      const enText = draft.ai_en || "";
+      const jaText = draft.ai_ja || "（日本語訳を取得中...）";
+      const ppvHtml = draft.ppv ? renderMessagePpvAttachmentHtml(draft.ppv) : "";
+      return `
+        <div class="pending-draft-bubble">
+          <span class="pending-draft-badge" id="pendingDraftBadge">⏳ 送信予定（残り${sec}秒）</span>
+          <div class="msg-meta">
+            <strong>📝 送信予定ドラフト</strong>
+            <span>🕐 送信予定: ${escapeHtml(hms)}</span>
+          </div>
+          ${enText ? `<div class="msg-en">${escapeHtml(enText)}</div>` : ""}
+          <div class="msg-divider"></div>
+          <div class="msg-ja">🇯🇵 ${escapeHtml(jaText)}</div>
+          ${ppvHtml}
+        </div>
+      `;
     }
 
     window.addEventListener("DOMContentLoaded", initApp);
