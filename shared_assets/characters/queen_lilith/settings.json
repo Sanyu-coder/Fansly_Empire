@@ -1,5 +1,5 @@
 {
-  "bot_enabled": true,
+  "bot_enabled": false,
   "default_prices": {
     "1": {
       "base_price_usd": 9.99,
