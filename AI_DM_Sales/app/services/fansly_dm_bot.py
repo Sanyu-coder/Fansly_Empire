@@ -673,11 +673,16 @@ class CharacterBotWorker:
         """現在待機カウントダウン中の自動返信ステータスを取得する"""
         now_ts = time.time()
         with self._lock:
-            items = (
-                [(fan_id, self._pending_replies[fan_id])]
-                if fan_id and fan_id in self._pending_replies
-                else list(self._pending_replies.items())
-            )
+            if fan_id:
+                # 指定ファンのみ取得する。該当ファンに待機中エントリが無ければ空辞書を返す
+                # （他ファンのエントリを誤って返すフォールバックは廃止）。
+                items = (
+                    [(fan_id, self._pending_replies[fan_id])]
+                    if fan_id in self._pending_replies
+                    else []
+                )
+            else:
+                items = list(self._pending_replies.items())
             out: Dict[str, Dict[str, Any]] = {}
             for fid, entry in items:
                 if entry["cancel_event"].is_set():
@@ -1082,6 +1087,45 @@ class CharacterBotWorker:
                 db_path=db_path,
             )
             self._monitored_only_fingerprints[fan_id] = fan_message_en.strip()
+
+        # TICKET-04 補強: 監視継続モード（稼働OFF / 睡眠 / 手動保留 / 要介入）でも
+        # 受信時点でAI返信ドラフトを先行生成し _pending_replies へ登録する。
+        # 送信実行は _process_due_pending_replies / _execute_pending_reply_entry が
+        # bot_enabled / manual_hold / is_escalated / sleeping をゲートするため、
+        # ドラフト登録のみを行い、実際に送信されることはない。
+        try:
+            engine_res = sales_engine.process_fan_message(
+                char_id=self.char_id,
+                user_message=fan_message_en,
+                fan_id=fan_id,
+                current_tier=detected_tier,
+                total_spent_usd=total_spent,
+                sales_phase=sales_phase,
+                consecutive_ppv_ignored=int(existing_fan.get("consecutive_ppv_ignored") or 0),
+                consecutive_unanswered=int(existing_fan.get("consecutive_unanswered") or 0),
+                recent_messages=recent_messages[:-1] if recent_messages else [],
+                existing_profile_json=existing_profile,
+                persist_db=False,
+                record_tip_in_db=False,
+                db_path=db_path,
+            )
+            self._schedule_pending_reply(
+                fan_id=fan_id,
+                username=username or fan_id,
+                fan_message_en=fan_message_en,
+                sales_phase=sales_phase,
+                engine_res=engine_res,
+                allow_when_bot_off=False,
+                db_path=db_path,
+                detected_tier=detected_tier,
+                total_spent_usd=total_spent,
+                consecutive_ppv_ignored=int(existing_fan.get("consecutive_ppv_ignored") or 0),
+                defer_state_commit=False,
+            )
+        except Exception as draft_err:
+            logger.warning(
+                f"[{self.char_id}] Monitor-only pre-draft generation failed for @{fan_id}: {draft_err}"
+            )
 
         return {
             "ok": True,
@@ -3106,7 +3150,20 @@ class CharacterBotWorker:
                     self._checked_read_previews[fan_id] = preview_text
                     continue
 
-                if fan_id in self._pending_replies and not self._pending_replies[fan_id]["cancel_event"].is_set():
+                _existing_pending = self._pending_replies.get(fan_id)
+                _monitor_draft_stale = (
+                    _existing_pending is not None
+                    and not _existing_pending["cancel_event"].is_set()
+                    # 稼働OFF時の監視継続ドラフト（allow_when_bot_off=False）は送信されずstaleになるため、
+                    # 新着受信で上書き（supersede）できるようにガードを緩和する。
+                    and not bool(_existing_pending.get("allow_when_bot_off"))
+                    and not bool(load_settings(self.char_id).get("bot_enabled", False))
+                )
+                if (
+                    _existing_pending is not None
+                    and not _existing_pending["cancel_event"].is_set()
+                    and not _monitor_draft_stale
+                ):
                     logger.info(f"[{self.char_id}] @{fan_id}: auto-reply countdown already active; skipping duplicate trigger")
                     self._checked_read_previews[fan_id] = preview_text
                     continue
