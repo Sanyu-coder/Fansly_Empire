@@ -568,6 +568,43 @@
       pointer-events: none;
       backdrop-filter: blur(3px);
     }
+    .vault-redact-btn {
+      position: absolute;
+      bottom: 7px;
+      left: 7px;
+      z-index: 5;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: rgba(168, 85, 247, 0.92);
+      border: 1px solid rgba(168, 85, 247, 0.7);
+      color: #fff;
+      font-size: 10.5px;
+      font-weight: 700;
+      padding: 3px 9px;
+      border-radius: 6px;
+      cursor: pointer;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+      transition: transform 0.12s ease, background 0.12s ease;
+    }
+    .vault-redact-btn:hover {
+      background: rgba(192, 132, 252, 1);
+      transform: translateY(-1px);
+    }
+    .vault-version-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      background: rgba(11, 9, 20, 0.86);
+      border: 1px solid rgba(168, 85, 247, 0.5);
+      border-radius: 6px;
+      padding: 3px 8px;
+      font-size: 10.5px;
+      font-weight: 700;
+      color: #e9d5ff;
+      cursor: pointer;
+      backdrop-filter: blur(3px);
+    }
     .vault-thumb-overlay {
       position: absolute;
       top: 7px;
@@ -1141,6 +1178,90 @@
       }
       .vault-step-prices-row { grid-template-columns: 1fr 1fr; }
       .vault-memo-2col { grid-template-columns: 1fr; }
+    }
+
+    /* ===== TICKET-08: PPVモザイク／ぼかし編集モーダル ===== */
+    .redact-modal-backdrop {
+      position: fixed; inset: 0; z-index: 2000;
+      background: rgba(5, 3, 12, 0.82); backdrop-filter: blur(6px);
+      display: none; align-items: center; justify-content: center;
+    }
+    .redact-modal-backdrop.open { display: flex; }
+    .redact-modal-card {
+      width: 92vw; height: 88vh;
+      background: var(--bg-dark); border: 1px solid var(--border-light);
+      border-radius: 14px; box-shadow: 0 24px 80px rgba(0,0,0,0.65);
+      display: flex; flex-direction: column; overflow: hidden;
+    }
+    .redact-modal-header {
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+      padding: 10px 16px; background: #17122b; border-bottom: 1px solid var(--border);
+    }
+    .redact-modal-title { font-size: 13.5px; font-weight: 700; color: #e9d5ff; min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .redact-header-actions { display: flex; align-items: center; gap: 8px; }
+    .redact-modal-body {
+      flex: 1; display: flex; min-height: 0; overflow: hidden;
+    }
+    .redact-canvas-pane {
+      flex: 1; position: relative; background: #0a0813;
+      display: flex; align-items: center; justify-content: center;
+      min-width: 0; overflow: hidden;
+    }
+    .redact-canvas-wrap { position: relative; }
+    .redact-canvas-wrap img, .redact-canvas-wrap video {
+      max-width: 100%; max-height: 100%; display: block;
+      user-select: none; -webkit-user-drag: none;
+    }
+    #redactCanvas {
+      position: absolute; inset: 0;
+      cursor: crosshair; touch-action: none;
+    }
+    .redact-side-pane {
+      width: 300px; flex-shrink: 0; background: var(--bg-panel);
+      border-left: 1px solid var(--border);
+      display: flex; flex-direction: column; overflow-y: auto;
+      padding: 14px 14px 16px;
+    }
+    .redact-guide {
+      font-size: 11.5px; color: var(--text-muted); line-height: 1.55;
+      background: var(--bg-input); border: 1px solid var(--border);
+      border-radius: 8px; padding: 9px 11px; margin-bottom: 12px;
+    }
+    .redact-field-label { font-size: 11px; font-weight: 700; color: #c4b5fd; margin: 10px 0 5px; text-transform: uppercase; letter-spacing: 0.04em; }
+    .redact-detect-status {
+      font-size: 12px; line-height: 1.5; border-radius: 8px; padding: 9px 11px;
+      border: 1px solid var(--border); background: var(--bg-input); color: var(--text-muted);
+    }
+    .redact-detect-status.found { border-color: rgba(34,197,94,0.4); background: rgba(34,197,94,0.08); color: #86efac; }
+    .redact-detect-status.empty { border-color: rgba(251,191,36,0.4); background: rgba(251,191,36,0.07); color: #fcd34d; }
+    .redact-box-list { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+    .redact-box-item {
+      display: flex; align-items: center; gap: 8px;
+      background: var(--bg-input); border: 1px solid var(--border);
+      border-radius: 7px; padding: 6px 9px; font-size: 12px; color: #e2e8f0;
+      cursor: pointer; transition: border-color 0.12s, background 0.12s;
+    }
+    .redact-box-item:hover { border-color: var(--border-light); }
+    .redact-box-item.selected { border-color: #a855f7; background: var(--accent-soft); }
+    .redact-box-item .redact-box-idx { font-weight: 700; color: #f87171; font-size: 11px; }
+    .redact-box-item .redact-box-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .redact-box-item .redact-box-dims { font-size: 10.5px; color: var(--text-muted); white-space: nowrap; }
+    .redact-box-del {
+      background: transparent; border: 1px solid rgba(248,113,113,0.4); color: #f87171;
+      border-radius: 5px; font-size: 10.5px; padding: 2px 7px; cursor: pointer;
+    }
+    .redact-box-del:hover { background: rgba(248,113,113,0.12); }
+    .redact-save-btn {
+      margin-top: auto; width: 100%; padding: 12px;
+      background: linear-gradient(135deg, #16a34a, #15803d); color: #fff;
+      border: none; border-radius: 9px; font-size: 13.5px; font-weight: 700;
+      cursor: pointer; box-shadow: 0 4px 16px rgba(22,163,74,0.3);
+    }
+    .redact-save-btn:hover { filter: brightness(1.1); }
+    .redact-save-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    @media (max-width: 860px) {
+      .redact-modal-body { flex-direction: column; }
+      .redact-side-pane { width: 100%; border-left: none; border-top: 1px solid var(--border); max-height: 40%; }
     }
   </style>
 </head>
@@ -1826,6 +1947,8 @@
         <span id="lightboxTitle" style="font-size:13px; color:#e9d5ff;">💎 メディア拡大プレビュー</span>
         <button class="btn btn-sm" onclick="closeMediaLightbox()">✕ 閉じる (ESC)</button>
       </div>
+      <div id="lightboxVersionBar" style="display:none; padding:6px 12px 0; align-items:center; justify-content:center; gap:6px; background:rgba(11,9,20,0.5); border-bottom:1px solid rgba(168,85,247,0.25);">
+      </div>
       <div id="lightboxBody" style="padding:12px; display:flex; align-items:center; justify-content:center; background:#05040a; min-height:260px; max-height:82vh;">
       </div>
     </div>
@@ -1844,6 +1967,42 @@
       </div>
       <div id="manualViewerBody" class="modal-body manual-content" style="padding:18px 22px;">
         読み込み中...
+      </div>
+    </div>
+  </div>
+
+  <!-- TICKET-08: PPVモザイク／ぼかし編集モーダル（2ペイン・リアルタイムプレビュー） -->
+  <div id="mediaRedactModal" class="redact-modal-backdrop" onclick="handleBackdropClose(event, 'mediaRedactModal', closeMediaRedactModal)">
+    <div class="redact-modal-card" onclick="event.stopPropagation()">
+      <div class="redact-modal-header">
+        <span class="redact-modal-title" id="redactModalTitle">✏️ 局部モザイク／ぼかし編集</span>
+        <div class="redact-header-actions">
+          <button class="btn btn-sm" id="redactDetectBtn" onclick="runRedactDetect()" style="background:var(--accent-hover); border-color:var(--accent-hover);">🤖 AI自動検出（🔴 陰部のみ）</button>
+          <button class="btn btn-sm" onclick="clearAllRedactBoxes()">🧹 全枠クリア</button>
+          <button class="btn btn-sm" style="background:#dc2626; border-color:#dc2626;" onclick="closeMediaRedactModal()">✕ 閉じる</button>
+        </div>
+      </div>
+      <div class="redact-modal-body">
+        <div class="redact-canvas-pane" id="redactCanvasPane">
+          <div class="redact-canvas-wrap" id="redactCanvasWrap">
+            <img id="redactMediaImg" src="" alt="" style="display:none;">
+            <video id="redactMediaVideo" src="" muted playsinline preload="metadata" style="display:none;"></video>
+            <canvas id="redactCanvas"></canvas>
+          </div>
+        </div>
+        <div class="redact-side-pane">
+          <div class="redact-guide">🖱️ ドラッグで新規枠追加、枠内ドラッグで移動、右下角ドラッグでリサイズできます。</div>
+          <div class="redact-field-label">加工種別</div>
+          <select id="redactTypeSelect" class="input-ctrl" style="width:100%;" onchange="onRedactTypeChange()">
+            <option value="mosaic">ピクセルモザイク (mosaic)</option>
+            <option value="blur">ガウシアンぼかし (blur)</option>
+          </select>
+          <div class="redact-field-label">検出ステータス</div>
+          <div class="redact-detect-status" id="redactDetectStatus">検出はまだ実行されていません。上部の「🤖 AI自動検出」を押下するか、キャンバス上でドラッグして手動指定してください。</div>
+          <div class="redact-field-label">矩形枠リスト（<span id="redactBoxCount">0</span>）</div>
+          <div class="redact-box-list" id="redactBoxList"></div>
+          <button class="redact-save-btn" id="redactSaveBtn" onclick="saveRedactAndPublish()">💾 局部加工を保存して公開</button>
+        </div>
       </div>
     </div>
   </div>
@@ -3081,6 +3240,8 @@
 
       grid.innerHTML = items.map(it => {
         const mediaUrl = `/api/vault/media/${encodeURIComponent(it.char_id)}/${encodeURIComponent(it.filename)}`;
+        const originalUrl = `/api/vault/media/${encodeURIComponent(it.char_id)}/${encodeURIComponent(it.filename)}?version=original`;
+        const isUnredacted = it.is_redacted !== true;
         const isPlayableVideo = it.media_type === "video" && it.file_exists !== false;
         const mediaTypeLabel = it.media_type === "video" ? "🎬 動画" : "🖼️ 画像";
         const stepBadgeClass = it.ladder_step === 1 ? "badge-char" : (it.ladder_step === 2 ? "badge-phase" : "badge-tier");
@@ -3096,13 +3257,15 @@
 
         return `
           <div class="vault-card ${it.is_active ? '' : 'inactive'}" id="vcard-${escapeHtml(ck)}">
-            <div class="vault-thumb-wrap" onclick="openMediaLightbox('${escapeHtml(mediaUrl)}', '${escapeHtml(it.media_type)}', ${it.file_exists !== false}, '${escapeHtml(it.ppv_id)} (${escapeHtml(stepLabel)} • ${escapeHtml(it.char_id)})')">
+            <div class="vault-thumb-wrap" onclick="openMediaLightbox('${escapeHtml(mediaUrl)}', '${escapeHtml(it.media_type)}', ${it.file_exists !== false}, '${escapeHtml(it.ppv_id)} (${escapeHtml(stepLabel)} • ${escapeHtml(it.char_id)})', ${it.original_exists === true ? `'${escapeHtml(originalUrl)}'` : `null`})">
               ${thumbMediaHtml}
               <div class="vault-thumb-overlay">
                 <span id="stepbadge-${escapeHtml(ck)}" class="badge ${stepBadgeClass}">${stepLabel}</span>
                 <span class="badge badge-low">${mediaTypeLabel} • ${escapeHtml(it.char_id)}</span>
+                ${isUnredacted ? `<span class="badge badge-alert">⚠️ 未加工（非公開ロック）</span>` : ''}
               </div>
               <div class="vault-zoom-hint">${isPlayableVideo ? '🔍 拡大・音声再生' : '🔍 拡大表示'}</div>
+              ${isUnredacted ? `<button class="vault-redact-btn" onclick="event.stopPropagation(); openMediaRedactModal('${escapeHtml(it.char_id)}', '${escapeHtml(it.ppv_id)}')">✂️ 加工</button>` : ''}
             </div>
 
             <div class="vault-card-body">
@@ -4198,17 +4361,57 @@
     }
 
     /* モーダル3：PPV画像・動画拡大ライトボックス */
-    function openMediaLightbox(mediaUrl, mediaType, fileExists, titleText) {
+    let lightboxMediaMeta = null;
+    let lightboxVersionState = "processed";
+
+    function _buildLightboxMedia(url) {
+      const body = document.getElementById("lightboxBody");
+      if (!body || !lightboxMediaMeta) return;
+      const { mediaType, fileExists } = lightboxMediaMeta;
+      const oldVid = body.querySelector("video");
+      if (oldVid) { try { oldVid.pause(); } catch (e) {} }
+      if (mediaType === "video" && fileExists) {
+        body.innerHTML = `<video id="lightboxVideoPlayer" src="${escapeHtml(url)}" controls autoplay playsinline style="max-width:88vw; max-height:78vh; object-fit:contain; border-radius:6px; background:#000;"></video>`;
+      } else {
+        body.innerHTML = `<img src="${escapeHtml(url)}" alt="preview" style="max-width:88vw; max-height:78vh; object-fit:contain; border-radius:6px;">`;
+      }
+    }
+
+    function _renderLightboxVersionBar() {
+      const bar = document.getElementById("lightboxVersionBar");
+      if (!bar) return;
+      if (!lightboxMediaMeta || !lightboxMediaMeta.originalUrl) {
+        bar.style.display = "none";
+        bar.innerHTML = "";
+        return;
+      }
+      const active = lightboxVersionState;
+      bar.innerHTML = `
+        <span style="font-size:10px; color:#a78bfa; font-weight:700;">表示切替:</span>
+        <button class="vault-version-toggle" ${active === "processed" ? 'style="background:rgba(168,85,247,0.45); border-color:#a855f7;"' : ''} onclick="setLightboxVersion('processed')">✂️ 加工後（送信本番）</button>
+        <button class="vault-version-toggle" ${active === "original" ? 'style="background:rgba(168,85,247,0.45); border-color:#a855f7;"' : ''} onclick="setLightboxVersion('original')">🔓 加工前（原本）</button>
+      `;
+      bar.style.display = "flex";
+    }
+
+    function setLightboxVersion(v) {
+      if (!lightboxMediaMeta) return;
+      lightboxVersionState = v;
+      const url = (v === "original") ? lightboxMediaMeta.originalUrl : lightboxMediaMeta.mediaUrl;
+      _buildLightboxMedia(url);
+      _renderLightboxVersionBar();
+    }
+
+    function openMediaLightbox(mediaUrl, mediaType, fileExists, titleText, originalUrl) {
       const modal = document.getElementById("mediaLightboxModal");
       const body = document.getElementById("lightboxBody");
       const titleEl = document.getElementById("lightboxTitle");
       if (!modal || !body) return;
+      lightboxMediaMeta = { mediaUrl, mediaType, fileExists, originalUrl: originalUrl || null };
+      lightboxVersionState = "processed";
       titleEl.textContent = `💎 ${titleText || 'PPVメディア拡大プレビュー'}`;
-      if (mediaType === "video" && fileExists) {
-        body.innerHTML = `<video id="lightboxVideoPlayer" src="${escapeHtml(mediaUrl)}" controls autoplay playsinline style="max-width:88vw; max-height:78vh; object-fit:contain; border-radius:6px; background:#000;"></video>`;
-      } else {
-        body.innerHTML = `<img src="${escapeHtml(mediaUrl)}" alt="preview" style="max-width:88vw; max-height:78vh; object-fit:contain; border-radius:6px;">`;
-      }
+      _buildLightboxMedia(mediaUrl);
+      _renderLightboxVersionBar();
       modal.classList.add("open");
     }
 
@@ -4223,6 +4426,412 @@
         body.innerHTML = "";
       }
       if (modal) modal.classList.remove("open");
+    }
+
+    /* ===== TICKET-08: PPVモザイク／ぼかし編集モーダル（2ペイン・リアルタイムプレビュー） ===== */
+    const redactModal = {
+      open: false, charId: "", ppvId: "", filename: "", mediaType: "image",
+      boxes: [], selectedIdx: -1, mediaW: 0, mediaH: 0,
+      drag: null, mediaEl: null, setupDone: false, session: 0,
+    };
+
+    function getRedactCanvas() { return document.getElementById("redactCanvas"); }
+
+    function openMediaRedactModal(charId, ppvId) {
+      const modal = document.getElementById("mediaRedactModal");
+      if (!modal) return;
+      const doOpen = (item) => {
+        if (!item) { showToast("⚠️ 対象PPV素材が見つかりません"); return; }
+        redactModal.open = true;
+        redactModal.charId = charId;
+        redactModal.ppvId = ppvId;
+        redactModal.filename = item.filename || ppvId;
+        redactModal.mediaType = item.media_type === "video" ? "video" : "image";
+        redactModal.boxes = [];
+        redactModal.selectedIdx = -1;
+        redactModal.drag = null;
+        redactModal.setupDone = false;
+        redactModal.session = (redactModal.session || 0) + 1;
+        const sessionToken = redactModal.session;
+
+        const c = (state.characters || []).find(x => x.char_id === charId);
+        const charName = c ? (c.display_name || charId) : charId;
+        const titleEl = document.getElementById("redactModalTitle");
+        if (titleEl) titleEl.textContent = `✏️ 局部モザイク／ぼかし編集: ${charName} ${redactModal.filename}`;
+
+        const mediaUrl = `/api/vault/media/${encodeURIComponent(charId)}/${encodeURIComponent(redactModal.filename)}`;
+        const img = document.getElementById("redactMediaImg");
+        const vid = document.getElementById("redactMediaVideo");
+        img.style.display = "none"; vid.style.display = "none";
+        const finishSetup = () => {
+          if (sessionToken !== redactModal.session) return;
+          if (!redactModal.setupDone) { redactModal.setupDone = true; setupRedactCanvas(); }
+        };
+        if (redactModal.mediaType === "video") {
+          vid.style.display = "block";
+          vid.src = mediaUrl;
+          vid.muted = true;
+          vid.addEventListener("loadedmetadata", () => { try { vid.currentTime = 0.1; } catch (e) {} });
+          vid.addEventListener("loadeddata", finishSetup);
+          vid.addEventListener("seeked", finishSetup);
+          setTimeout(finishSetup, 2500);
+        } else {
+          img.style.display = "block";
+          img.src = mediaUrl;
+          img.onload = finishSetup;
+          setTimeout(finishSetup, 2500);
+        }
+        resetRedactStatus();
+        renderRedactBoxList();
+        modal.classList.add("open");
+      };
+      const cache = (state.vaultCacheByChar && state.vaultCacheByChar[charId]) || [];
+      const cached = cache.find(it => it.ppv_id === ppvId);
+      if (cached) { doOpen(cached); return; }
+      fetch(`/api/vault/list?${new URLSearchParams({ char_id: charId, ladder_step: "all", media_type: "all" }).toString()}`)
+        .then(r => r.json())
+        .then(data => {
+          const item = (data.ok ? (data.items || []) : []).find(it => it.ppv_id === ppvId);
+          doOpen(item);
+        })
+        .catch(() => doOpen(null));
+    }
+
+    function closeMediaRedactModal() {
+      const modal = document.getElementById("mediaRedactModal");
+      if (!modal) return;
+      redactModal.open = false;
+      redactModal.drag = null;
+      const vid = document.getElementById("redactMediaVideo");
+      try { vid.pause(); vid.removeAttribute("src"); vid.load(); } catch (e) {}
+      modal.classList.remove("open");
+    }
+
+    function setupRedactCanvas() {
+      const canvas = getRedactCanvas();
+      if (!canvas) return;
+      redactModal.mediaEl = redactModal.mediaType === "video"
+        ? document.getElementById("redactMediaVideo")
+        : document.getElementById("redactMediaImg");
+      sizeRedactCanvas();
+      bindRedactCanvasEvents(canvas);
+      drawRedactCanvas();
+    }
+
+    function sizeRedactCanvas() {
+      const canvas = getRedactCanvas();
+      const mediaEl = redactModal.mediaEl;
+      if (!canvas || !mediaEl) return;
+      const w = mediaEl.clientWidth || 0;
+      const h = mediaEl.clientHeight || 0;
+      if (!w || !h) return;
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = Math.round(w * dpr);
+      canvas.height = Math.round(h * dpr);
+      canvas.style.width = w + "px";
+      canvas.style.height = h + "px";
+      const ctx = canvas.getContext("2d");
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      redactModal.mediaW = mediaEl.naturalWidth || mediaEl.videoWidth || w;
+      redactModal.mediaH = mediaEl.naturalHeight || mediaEl.videoHeight || h;
+    }
+
+    window.addEventListener("resize", () => {
+      if (!redactModal.open) return;
+      sizeRedactCanvas();
+      drawRedactCanvas();
+    });
+
+    function eventToNorm(e) {
+      const canvas = getRedactCanvas();
+      if (!canvas) return null;
+      const r = canvas.getBoundingClientRect();
+      if (!r.width || !r.height) return null;
+      return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height };
+    }
+
+    function hitTestRedactBox(nx, ny) {
+      const canvas = getRedactCanvas();
+      const r = canvas ? canvas.getBoundingClientRect() : { width: 0, height: 0 };
+      const cw = r.width, ch = r.height;
+      const HANDLE = 14;
+      for (let i = redactModal.boxes.length - 1; i >= 0; i--) {
+        const b = redactModal.boxes[i];
+        const hx = (b.x + b.w) * cw, hy = (b.y + b.h) * ch;
+        const px = nx * cw, py = ny * ch;
+        if (Math.abs(px - hx) <= HANDLE && Math.abs(py - hy) <= HANDLE) return { type: "resize", idx: i };
+      }
+      for (let i = redactModal.boxes.length - 1; i >= 0; i--) {
+        const b = redactModal.boxes[i];
+        if (nx >= b.x && nx <= b.x + b.w && ny >= b.y && ny <= b.y + b.h) return { type: "box", idx: i };
+      }
+      return { type: "none" };
+    }
+
+    function bindRedactCanvasEvents(canvas) {
+      canvas.onpointerdown = (e) => {
+        if (!redactModal.open) return;
+        const p = eventToNorm(e);
+        if (!p) return;
+        const hit = hitTestRedactBox(p.x, p.y);
+        if (hit.type === "resize") {
+          redactModal.drag = { mode: "resize", idx: hit.idx };
+          redactModal.selectedIdx = hit.idx;
+        } else if (hit.type === "box") {
+          const b = redactModal.boxes[hit.idx];
+          redactModal.drag = { mode: "move", idx: hit.idx, offX: p.x - b.x, offY: p.y - b.y };
+          redactModal.selectedIdx = hit.idx;
+        } else {
+          const nb = { x: p.x, y: p.y, w: 0, h: 0, label: "手動" };
+          redactModal.boxes.push(nb);
+          redactModal.drag = { mode: "new", idx: redactModal.boxes.length - 1, x0: p.x, y0: p.y };
+          redactModal.selectedIdx = redactModal.boxes.length - 1;
+        }
+        try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
+        renderRedactBoxList();
+        drawRedactCanvas();
+      };
+      canvas.onpointermove = (e) => {
+        if (!redactModal.open || !redactModal.drag) return;
+        const p = eventToNorm(e);
+        if (!p) return;
+        const d = redactModal.drag;
+        const b = redactModal.boxes[d.idx];
+        if (!b) { redactModal.drag = null; return; }
+        if (d.mode === "new") {
+          b.x = Math.min(p.x, d.x0); b.y = Math.min(p.y, d.y0);
+          b.w = Math.abs(p.x - d.x0); b.h = Math.abs(p.y - d.y0);
+        } else if (d.mode === "move") {
+          b.x = Math.min(Math.max(0, p.x - d.offX), Math.max(0, 1 - b.w));
+          b.y = Math.min(Math.max(0, p.y - d.offY), Math.max(0, 1 - b.h));
+        } else if (d.mode === "resize") {
+          b.w = Math.min(Math.max(0.01, p.x - b.x), 1 - b.x);
+          b.h = Math.min(Math.max(0.01, p.y - b.y), 1 - b.y);
+        }
+        drawRedactCanvas();
+        renderRedactBoxList();
+      };
+      const endDrag = () => {
+        if (!redactModal.drag) return;
+        const d = redactModal.drag;
+        const b = redactModal.boxes[d.idx];
+        if (d.mode === "new" && b && (b.w < 0.01 || b.h < 0.01)) {
+          redactModal.boxes.splice(d.idx, 1);
+          redactModal.selectedIdx = -1;
+        }
+        redactModal.drag = null;
+        renderRedactBoxList();
+        drawRedactCanvas();
+      };
+      canvas.onpointerup = endDrag;
+      canvas.onpointercancel = endDrag;
+    }
+
+    function drawRedactCanvas() {
+      const canvas = getRedactCanvas();
+      if (!canvas) return;
+      const ctx = canvas.getContext("2d");
+      const w = canvas.clientWidth, h = canvas.clientHeight;
+      ctx.clearRect(0, 0, w, h);
+      if (!w || !h) return;
+      const mediaEl = redactModal.mediaEl;
+      const typeSel = document.getElementById("redactTypeSelect");
+      const type = typeSel ? typeSel.value : "mosaic";
+      const mediaReady = mediaEl && (
+        mediaEl.tagName === "IMG" ? mediaEl.naturalWidth > 0 : mediaEl.readyState >= 2
+      );
+      redactModal.boxes.forEach((b, i) => {
+        const bx = b.x * w, by = b.y * h, bw = b.w * w, bh = b.h * h;
+        if (bw <= 0 || bh <= 0) return;
+        if (mediaReady) {
+          if (type === "mosaic") {
+            const block = 10;
+            const sw = Math.max(1, Math.floor(bw / block));
+            const sh = Math.max(1, Math.floor(bh / block));
+            const nx = b.x * redactModal.mediaW, ny = b.y * redactModal.mediaH;
+            const nw = b.w * redactModal.mediaW, nh = b.h * redactModal.mediaH;
+            const off = document.createElement("canvas");
+            off.width = sw; off.height = sh;
+            const octx = off.getContext("2d");
+            octx.drawImage(mediaEl, nx, ny, nw, nh, 0, 0, sw, sh);
+            ctx.save();
+            ctx.imageSmoothingEnabled = false;
+            ctx.drawImage(off, 0, 0, sw, sh, bx, by, bw, bh);
+            ctx.restore();
+          } else {
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(bx, by, bw, bh);
+            ctx.clip();
+            ctx.filter = "blur(10px)";
+            ctx.drawImage(mediaEl, 0, 0, redactModal.mediaW, redactModal.mediaH, 0, 0, w, h);
+            ctx.filter = "none";
+            ctx.restore();
+          }
+        }
+        ctx.save();
+        ctx.strokeStyle = i === redactModal.selectedIdx ? "#f87171" : "#ef4444";
+        ctx.lineWidth = i === redactModal.selectedIdx ? 3 : 2;
+        ctx.strokeRect(bx, by, bw, bh);
+        ctx.fillStyle = "#22d3ee";
+        ctx.fillRect(bx + bw - 7, by + bh - 7, 7, 7);
+        ctx.strokeStyle = "#0e7490";
+        ctx.lineWidth = 1;
+        ctx.strokeRect(bx + bw - 7, by + bh - 7, 7, 7);
+        const label = `#${i + 1} ${b.label || ""}`.replace(/\s+/g, " ").trim();
+        ctx.font = "10px sans-serif";
+        const tw = ctx.measureText(label).width;
+        const pad = 5, lh = 16;
+        let lx = bx, ly = by - lh - 2;
+        if (ly < 0) ly = by + 2;
+        if (lx + tw + pad * 2 > w) lx = Math.max(0, w - tw - pad * 2);
+        ctx.fillStyle = "rgba(127,29,29,0.85)";
+        roundRectPath(ctx, lx, ly, tw + pad * 2, lh, 4);
+        ctx.fill();
+        ctx.fillStyle = "#fecaca";
+        ctx.fillText(label, lx + pad, ly + 11.5);
+        ctx.restore();
+      });
+    }
+
+    function roundRectPath(ctx, x, y, w, h, r) {
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.arcTo(x + w, y, x + w, y + h, r);
+      ctx.arcTo(x + w, y + h, x, y + h, r);
+      ctx.arcTo(x, y + h, x, y, r);
+      ctx.arcTo(x, y, x + w, y, r);
+      ctx.closePath();
+    }
+
+    function renderRedactBoxList() {
+      const list = document.getElementById("redactBoxList");
+      const cnt = document.getElementById("redactBoxCount");
+      if (!list) return;
+      if (cnt) cnt.textContent = String(redactModal.boxes.length);
+      if (!redactModal.boxes.length) {
+        list.innerHTML = `<div style="font-size:11px; color:var(--text-muted); padding:4px 2px;">矩形枠はまだありません。キャンバス上でドラッグしてください。</div>`;
+        return;
+      }
+      list.innerHTML = redactModal.boxes.map((b, i) => {
+        const pw = Math.round(b.w * redactModal.mediaW);
+        const ph = Math.round(b.h * redactModal.mediaH);
+        const label = b.label === "陰部" ? "🔴 陰部" : "🖐️ 手動";
+        return `<div class="redact-box-item ${i === redactModal.selectedIdx ? 'selected' : ''}" onclick="selectRedactBox(${i})">
+          <span class="redact-box-idx">#${i + 1}</span>
+          <span class="redact-box-label">${label}</span>
+          <span class="redact-box-dims">${pw}×${ph}px</span>
+          <button class="redact-box-del" onclick="event.stopPropagation(); deleteRedactBox(${i})">削除</button>
+        </div>`;
+      }).join("");
+    }
+
+    function selectRedactBox(i) {
+      redactModal.selectedIdx = i;
+      renderRedactBoxList();
+      drawRedactCanvas();
+    }
+
+    function deleteRedactBox(i) {
+      if (i < 0 || i >= redactModal.boxes.length) return;
+      redactModal.boxes.splice(i, 1);
+      if (redactModal.selectedIdx >= redactModal.boxes.length) redactModal.selectedIdx = redactModal.boxes.length - 1;
+      renderRedactBoxList();
+      drawRedactCanvas();
+    }
+
+    function clearAllRedactBoxes() {
+      redactModal.boxes = [];
+      redactModal.selectedIdx = -1;
+      renderRedactBoxList();
+      drawRedactCanvas();
+    }
+
+    function resetRedactStatus() {
+      const el = document.getElementById("redactDetectStatus");
+      if (!el) return;
+      el.className = "redact-detect-status";
+      el.textContent = "検出はまだ実行されていません。上部の「🤖 AI自動検出」を押下するか、キャンバス上でドラッグして手動指定してください。";
+    }
+
+    async function runRedactDetect() {
+      const btn = document.getElementById("redactDetectBtn");
+      const statusEl = document.getElementById("redactDetectStatus");
+      if (!redactModal.open) return;
+      if (btn) { btn.disabled = true; btn.textContent = "🤖 検出中..."; }
+      if (statusEl) { statusEl.className = "redact-detect-status"; statusEl.textContent = "🤖 AI自動検出を実行中..."; }
+      try {
+        const res = await fetch("/api/vault/redact", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            char_id: redactModal.charId,
+            ppv_id: redactModal.ppvId,
+            preview_detect_only: true,
+          }),
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || "検出に失敗しました");
+        const boxes = Array.isArray(data.boxes) ? data.boxes : [];
+        const detected = data.detected === true && boxes.length > 0;
+        if (detected) {
+          redactModal.boxes = boxes.map(b => ({ x: +b.x || 0, y: +b.y || 0, w: +b.w || 0, h: +b.h || 0, label: "陰部" }));
+          redactModal.selectedIdx = -1;
+          if (statusEl) {
+            statusEl.className = "redact-detect-status found";
+            statusEl.textContent = `✅ 🔴 陰部 ${boxes.length}箇所を検出しました（ドラッグで微調整可）`;
+          }
+        } else if (statusEl) {
+          statusEl.className = "redact-detect-status empty";
+          statusEl.textContent = "検出0件：手動ドラッグで範囲を指定してください";
+        }
+        renderRedactBoxList();
+        drawRedactCanvas();
+      } catch (e) {
+        if (statusEl) {
+          statusEl.className = "redact-detect-status empty";
+          statusEl.textContent = `❌ 検出エラー: ${e.message}`;
+        }
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = "🤖 AI自動検出（🔴 陰部のみ）"; }
+      }
+    }
+
+    function onRedactTypeChange() {
+      drawRedactCanvas();
+    }
+
+    async function saveRedactAndPublish() {
+      if (!redactModal.open) return;
+      if (redactModal.boxes.length === 0) {
+        showToast("⚠️ 矩形枠が0件です。AI自動検出またはドラッグで加工範囲を指定してください。");
+        return;
+      }
+      const btn = document.getElementById("redactSaveBtn");
+      if (btn) { btn.disabled = true; btn.textContent = "💾 保存中..."; }
+      try {
+        const typeSel = document.getElementById("redactTypeSelect");
+        const redactType = typeSel ? typeSel.value : "mosaic";
+        const res = await fetch("/api/vault/redact", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            char_id: redactModal.charId,
+            ppv_id: redactModal.ppvId,
+            redact_type: redactType,
+            boxes: redactModal.boxes.map(b => ({ x: b.x, y: b.y, w: b.w, h: b.h })),
+          }),
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || "保存に失敗しました");
+        closeMediaRedactModal();
+        showToast("✅ 局部加工を保存しました。素材を公開（is_active=ON）に切り替えました。");
+        if (typeof loadVaultList === "function") loadVaultList();
+      } catch (e) {
+        showToast("❌ 保存エラー: " + e.message);
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = "💾 局部加工を保存して公開"; }
+      }
     }
 
     /* モーダル4：運用マニュアル閲覧モーダル（Markdown整形 + キーワード検索） */
