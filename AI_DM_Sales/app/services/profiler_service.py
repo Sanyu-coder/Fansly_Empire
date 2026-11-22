@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Union
 
 from app.core.database import get_fan_record, save_fan_psych_profile_db
-from app.core.llm_client import llm_client
+from app.core.llm_client import llm_client, execute_with_resilient_retry, LLMResilientRetryExhaustedError
 
 
 def _parse_existing_profile(existing_profile_json: Union[str, Dict[str, Any], None]) -> Dict[str, Any]:
@@ -290,12 +290,18 @@ def update_fan_psych_profile(
         "Extract and merge the updated psychological profile as JSON with all values in clear Japanese."
     )
 
-    llm_extracted = llm_client.generate_json(
-        system_prompt=system_prompt,
-        user_prompt=user_prompt,
-        default_data=default_profile,
-        temperature=0.3,
-    )
+    try:
+        llm_extracted = execute_with_resilient_retry(
+            lambda: llm_client.generate_json(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                default_data=default_profile,
+                temperature=0.3,
+            ),
+            task_name="profiler_generate_json",
+        )
+    except LLMResilientRetryExhaustedError:
+        llm_extracted = dict(default_profile)
 
     llm_prefs = _normalize_str_list(
         llm_extracted.get("preferences") or llm_extracted.get("fetishes")

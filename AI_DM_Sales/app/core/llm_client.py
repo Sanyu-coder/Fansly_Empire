@@ -5,11 +5,129 @@ import os
 import re
 import subprocess
 import tempfile
+import threading
+import time
 import urllib.error
 import urllib.request
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from app.core import config
+
+
+# ==========================================
+# Ticket 2.1: Ollama 直列化ロックの優先度キュー化
+# ==========================================
+
+class Priority:
+    """Ollama 推論リクエストの優先度定義（数値が小さいほど優先度が高い）。"""
+
+    HIGH = 0  # リアルタイムDM返信生成・耳役タグ分類
+    LOW = 1   # バックグラウンド facts / conversation_summary 更新
+
+
+class PriorityLock:
+    """
+    2段階優先度（HIGH=0 / LOW=1）を持つ直列化ロック（厳密 FIFO / 排他制御版）。
+
+    設計（レビュー修正版）:
+    - 待機キューは `List[Tuple[int, int]]`（(priority, seq)）を保持し、
+      `threading.Condition` でブロッキング待機する。
+    - 自アイテムが「待機キューの最小要素 (priority, seq)」であることだけを
+      実行条件とするため:
+        * 同一優先度内は seq 到着順 (FIFO) で厳密に順次実行される
+        * 異なる優先度では priority 値の小さい方（HIGH）が常に先頭になる
+        * 実行中スレッドが release() するまで、後続スレッドは `cond.wait()` で
+          完全に停止し、割り込み・先回り・二重取得が物理的に起きない
+    - 取得待ちの上限 `_acquire_timeout_sec`（デフォルト300秒）を超えた場合は
+      キューから自アイテムを除去し TimeoutError を送出（上位層のフォールバック用）。
+    """
+
+    def __init__(self, acquire_timeout_sec: float = 300.0):
+        self._queue: List[Tuple[int, int]] = []
+        self._counter = 0
+        self._cond = threading.Condition(threading.Lock())
+        self._held = False
+        self._active_priority: int = Priority.HIGH
+        self._active_lock = threading.Lock()
+        self._acquire_timeout_sec = acquire_timeout_sec
+
+    def _next_seq(self) -> int:
+        with self._cond:
+            self._counter += 1
+            return self._counter
+
+    def acquire(self, priority: int = Priority.HIGH) -> None:
+        """指定優先度でロックを排他的に取得する（ブロッキング・厳密 FIFO）。"""
+        item = (int(priority), self._next_seq())
+        deadline = time.time() + self._acquire_timeout_sec
+        with self._cond:
+            self._queue.append(item)
+            while True:
+                # 実行条件: ロック未保持 AND 自アイテムがキュー最小
+                if not self._held and self._queue and min(self._queue) == item:
+                    self._queue.remove(item)
+                    self._held = True
+                    with self._active_lock:
+                        self._active_priority = int(priority)
+                    return
+                remaining = deadline - time.time()
+                if remaining <= 0:
+                    try:
+                        self._queue.remove(item)
+                    except ValueError:
+                        pass
+                    raise TimeoutError(
+                        f"PriorityLock: 優先度{priority}のロック取得が "
+                        f"{self._acquire_timeout_sec:.0f} 秒を超えた"
+                    )
+                self._cond.wait(remaining)
+
+    def release(self) -> None:
+        """ロックを解放し、待機中スレッド全てを wake してバトンタッチする。"""
+        with self._active_lock:
+            self._active_priority = Priority.HIGH
+        with self._cond:
+            self._held = False
+            self._cond.notify_all()
+
+    def active_priority(self) -> int:
+        """現在実行中のリクエストの優先度を返す（デフォルト HIGH）。"""
+        with self._active_lock:
+            return self._active_priority
+
+    def waiting_count(self) -> int:
+        """現在キューに待機中のリクエスト数を返す。"""
+        with self._cond:
+            return len(self._queue)
+
+    def context(self, priority: int = Priority.HIGH):
+        """`with priority_lock.context(Priority.LOW):` 形式で使用するコンテキストマネージャ。"""
+        return _PriorityLockContext(self, priority)
+
+
+class _PriorityLockContext:
+    """PriorityLock.acquire/release を with 文で使えるようにするラッパー。"""
+
+    def __init__(self, lock: "PriorityLock", priority: int):
+        self._lock = lock
+        self._priority = int(priority)
+
+    def __enter__(self) -> "PriorityLock":
+        self._lock.acquire(self._priority)
+        return self._lock
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        self._lock.release()
+        return None
+
+
+# モジュールレベルの共有 PriorityLock（DM推論・耳役・背景記憶更新の全リクエストが共有する）
+_llm_priority_lock = PriorityLock(acquire_timeout_sec=300.0)
+
+
+def get_llm_priority_lock() -> PriorityLock:
+    """モジュール共有の PriorityLock インスタンスを返す（テスト・外部監視用）。"""
+    return _llm_priority_lock
 
 
 class LLMClient:
@@ -136,6 +254,9 @@ class LLMClient:
             "prompt": user_prompt,
             "think": False,
             "stream": False,
+            # Ticket 2.1: 推論完了後60秒でモデルをVRAMから解放し、
+            # ComfyUI/VSCode等の重いタスクとのVRAM競合を速やかに解消する。
+            "keep_alive": "60s",
             "options": {
                 "temperature": temperature,
                 "num_predict": max_tokens,
@@ -171,6 +292,8 @@ class LLMClient:
             "max_tokens": max(max_tokens, 800),
             "think": False,
             "stream": False,
+            # Ticket 2.1: keep_alive 60s で VRAM 即解放（Ollama は未知キーを無視するため安全）
+            "keep_alive": "60s",
         }
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(
@@ -200,13 +323,20 @@ class LLMClient:
         temperature: float = 0.7,
         max_tokens: int = 512,
         fallback_text: str = "",
+        priority: int = Priority.HIGH,
     ) -> str:
-        res = self._call_chat_completions(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
+        """
+        テキスト生成（Ticket 2.1: PriorityLock で直列化）。
+        - priority=Priority.HIGH: リアルタイムDM返信生成・耳役タグ分類（デフォルト）
+        - priority=Priority.LOW:  バックグラウンド facts / conversation_summary 更新
+        """
+        with _llm_priority_lock.context(priority):
+            res = self._call_chat_completions(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
         raw_out = res if res else fallback_text
         return self.normalize_dm_newlines(raw_out)
 
@@ -217,14 +347,20 @@ class LLMClient:
         default_data: Optional[Dict[str, Any]] = None,
         temperature: float = 0.4,
         max_tokens: int = 750,
+        priority: int = Priority.HIGH,
     ) -> Dict[str, Any]:
-        res = self._call_chat_completions(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            json_mode=True,
-        )
+        """
+        JSON 生成（Ticket 2.1: PriorityLock で直列化）。
+        引数・優先度仕様は generate_text と同一。
+        """
+        with _llm_priority_lock.context(priority):
+            res = self._call_chat_completions(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                json_mode=True,
+            )
         if res:
             parsed = self.extract_json_object(res, default=None)
             if parsed:
@@ -661,6 +797,8 @@ class LLMClient:
                 "images": [image_b64],
                 "stream": False,
                 "format": "json",
+                # Ticket 2.1: Vision推論でもVRAM即解放（keep_alive 60s）
+                "keep_alive": "60s",
                 "options": {
                     "temperature": temperature,
                     "num_predict": max_tokens,
@@ -954,6 +1092,152 @@ class LLMClient:
 
 
 llm_client = LLMClient()
+
+
+# ==========================================
+# Ticket 2.1: [⚙️ 設定] 由来の個別 Ollama URL/モデル名オーバーライド
+# ==========================================
+
+def get_effective_llm_config(db_path: Optional[str] = None) -> Dict[str, str]:
+    """
+    DM推論に使用する Ollama 接続先・モデル名を決定する (Ticket 2.1)。
+
+    - system_settings の `dm_ollama_base_url` / `dm_ollama_model_name` が
+      空文字でなければそれを優先する（将来の2枚目GPU・別ポート運用用）。
+    - 空文字またはDB取得失敗の場合は `config.OLLAMA_BASE_URL` / `config.MODEL_NAME` を使用。
+
+    戻り値: {"base_url": str, "model_name": str}
+    """
+    base_url = config.OLLAMA_BASE_URL
+    model_name = config.MODEL_NAME
+    values: Dict[str, str] = {}
+    try:
+        from app.core import database
+        conn = database.get_db_connection(db_path)
+    except Exception:
+        conn = None
+    if conn is not None:
+        try:
+            rows = conn.execute(
+                "SELECT setting_key, setting_value FROM system_settings "
+                "WHERE setting_key IN (?, ?);",
+                ("dm_ollama_base_url", "dm_ollama_model_name"),
+            ).fetchall()
+            values = {row["setting_key"]: str(row["setting_value"] or "") for row in rows}
+        except Exception:
+            values = {}
+        finally:
+            conn.close()
+    override_url = values.get("dm_ollama_base_url", "").strip()
+    override_model = values.get("dm_ollama_model_name", "").strip()
+    if override_url:
+        base_url = override_url
+    if override_model:
+        model_name = override_model
+    return {"base_url": str(base_url).rstrip("/"), "model_name": str(model_name)}
+
+
+# ==========================================
+# Ticket 2.2: 長時間粘り強い不屈のリトライ（最大20回 / 約40分）と滞留通知
+# ==========================================
+
+class LLMResilientRetryExhaustedError(Exception):
+    """
+    execute_with_resilient_retry() が最大試行回数に達しても復旧しなかった場合の例外。
+    上位層（sales_engine / followup_worker 等）はこの例外を捕捉して
+    フォールバック返信またはアラート停止へ回す。
+    """
+
+    def __init__(self, task_name: str, attempts: int, last_error: Optional[BaseException]):
+        self.task_name = task_name
+        self.attempts = attempts
+        self.last_error = last_error
+        super().__init__(
+            f"タスク '{task_name}' は {attempts} 回のリトライでも復旧しませんでした "
+            f"(最終エラー: {type(last_error).__name__ if last_error else 'N/A'}: {last_error})"
+        )
+
+
+def execute_with_resilient_retry(
+    task_func: Callable[[], Any],
+    task_name: str,
+    max_retries: int = 20,
+    retry_interval_sec: float = 120.0,
+    alert_delay_sec: float = 900.0,
+    attempt_timeout_sec: float = 210.0,
+    db_path: Optional[str] = None,
+) -> Any:
+    """
+    Ollama 接続失敗・GPUメモリ不足・タイムアウトに耐える不屈のリトライ実行器 (Ticket 2.2)。
+
+    仕様:
+    - 1試行あたりのタイムアウトは `attempt_timeout_sec`（デフォルト210秒、180〜240秒帯）。
+    - 例外（HTTP 500/503・接続拒否・タイムアウト等）が発生してもメッセージを破棄せず、
+      `retry_interval_sec`（デフォルト120秒=2分）待機して再試行する。
+    - 経過時間が `alert_delay_sec`（デフォルト900秒=15分）を超えた時点で
+      `send_discord_alert()` により「⚠️ VRAM競合またはOllama応答停止によりタスクが15分以上滞留中」
+      を1回だけ通知する（処理は諦めず継続）。
+    - 最大 `max_retries`（デフォルト20回、約40分）に達しても復旧しない場合のみ
+      `LLMResilientRetryExhaustedError` を送出し、上位層でフォールバックへ回す。
+
+    戻り値: task_func() の正常戻り値。
+    """
+    start_ts = time.time()
+    alert_sent = False
+    last_error: Optional[BaseException] = None
+
+    for attempt in range(1, int(max_retries) + 1):
+        result_box: Dict[str, Any] = {}
+        done_evt = threading.Event()
+
+        def _runner() -> None:
+            try:
+                result_box["value"] = task_func()
+                result_box["ok"] = True
+            except BaseException as exc:  # noqa: BLE001 - 上位層へ詳細を渡すため握りつぶさない
+                result_box["error"] = exc
+            finally:
+                done_evt.set()
+
+        worker = threading.Thread(target=_runner, name=f"resilient-{task_name}-{attempt}", daemon=True)
+        worker.start()
+        finished = done_evt.wait(attempt_timeout_sec)
+
+        if finished and result_box.get("ok"):
+            return result_box["value"]
+
+        if finished:
+            last_error = result_box.get("error")
+            err_desc = f"{type(last_error).__name__}: {last_error}" if last_error else "unknown"
+        else:
+            last_error = TimeoutError(f"{attempt_timeout_sec:.0f}秒以内に完了しなかった")
+            err_desc = f"timeout>{attempt_timeout_sec:.0f}s"
+
+        elapsed = time.time() - start_ts
+        if not alert_sent and elapsed >= float(alert_delay_sec):
+            try:
+                from app.core import discord_notifier
+                discord_notifier.send_discord_alert(
+                    title=f"⚠️ VRAM競合またはOllama応答停止によりタスクが15分以上滞留中 ({task_name})",
+                    message=(
+                        f"タスク '{task_name}' が {attempt} 回連続で失敗し、15分以上滞留しています。\n"
+                        f"最終エラー: {err_desc}\n"
+                        f"リトライ間隔 {retry_interval_sec:.0f}秒、最大 {max_retries} 回（約 "
+                        f"{max_retries * retry_interval_sec / 60.0:.0f} 分）まで継続します。"
+                    ),
+                    level="WARNING",
+                    extra_fields={"task": str(task_name), "attempt": str(attempt)},
+                    db_path=db_path,
+                )
+            except Exception:
+                pass
+            alert_sent = True
+
+        if attempt >= int(max_retries):
+            break
+        time.sleep(float(retry_interval_sec))
+
+    raise LLMResilientRetryExhaustedError(task_name, int(max_retries), last_error)
 
 
 

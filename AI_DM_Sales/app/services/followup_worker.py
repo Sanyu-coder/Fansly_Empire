@@ -18,7 +18,7 @@ from app.core.database import (
     record_ppv_offer,
     upsert_fan_sales_state,
 )
-from app.core.llm_client import llm_client
+from app.core.llm_client import llm_client, execute_with_resilient_retry, LLMResilientRetryExhaustedError
 from app.services.character_loader import (
     is_vault_item_sendable_to_customer,
     load_dm_persona,
@@ -188,13 +188,19 @@ class FollowupWorker:
             "Output ONLY the raw English DM text."
         )
 
-        msg_en = self.llm.generate_text(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            temperature=0.7,
-            max_tokens=120,
-            fallback_text=fallback_en,
-        )
+        try:
+            msg_en = execute_with_resilient_retry(
+                lambda: self.llm.generate_text(
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    temperature=0.7,
+                    max_tokens=120,
+                    fallback_text=fallback_en,
+                ),
+                task_name="fomo_reminder_generate",
+            )
+        except LLMResilientRetryExhaustedError:
+            msg_en = fallback_en
         msg_ja = self.llm.translate_to_japanese(msg_en) if msg_en != fallback_en else fallback_ja
         return {"en": msg_en, "ja": msg_ja}
 
@@ -363,13 +369,19 @@ class FollowupWorker:
         )
         user_prompt = f"Fan: {username}, Step 2 PPV ID: {step2_ppv.get('ppv_id')}, Price: ${offered_price:.2f}"
 
-        msg_en = self.llm.generate_text(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            temperature=0.7,
-            max_tokens=150,
-            fallback_text=fallback_en,
-        )
+        try:
+            msg_en = execute_with_resilient_retry(
+                lambda: self.llm.generate_text(
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    temperature=0.7,
+                    max_tokens=150,
+                    fallback_text=fallback_en,
+                ),
+                task_name="step2_followup_generate",
+            )
+        except LLMResilientRetryExhaustedError:
+            msg_en = fallback_en
         msg_ja = self.llm.translate_to_japanese(msg_en) if msg_en != fallback_en else fallback_ja
         return {"en": msg_en, "ja": msg_ja}
 

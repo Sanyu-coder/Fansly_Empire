@@ -12,7 +12,7 @@ from app.core.database import (
     get_thread_detail,
     upsert_fan_sales_state,
 )
-from app.core.llm_client import llm_client
+from app.core.llm_client import llm_client, execute_with_resilient_retry, LLMResilientRetryExhaustedError
 from app.services.character_loader import list_character_ids, load_dm_persona, load_settings
 from app.services.fansly_dm_bot import bot_manager, check_char_sleep_state
 from app.services.profiler_service import format_psych_profile_for_prompt
@@ -115,13 +115,20 @@ def generate_personalized_revival_dm(
     user_prompt = f"Past Context:\n{history_snippet}\n\nWrite personalized English reunion DM to @{username}:"
 
     fallback_en = _build_personalized_fallback_revival_en(persona, username, psych_profile)
-    msg_en = client.generate_text(
-        system_prompt=system_prompt,
-        user_prompt=user_prompt,
-        temperature=0.75,
-        max_tokens=220,
-        fallback_text=fallback_en,
-    ).strip() or fallback_en
+    try:
+        msg_en = execute_with_resilient_retry(
+            lambda: client.generate_text(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                temperature=0.75,
+                max_tokens=220,
+                fallback_text=fallback_en,
+            ),
+            task_name="dormant_revival_generate",
+        ).strip() or fallback_en
+    except LLMResilientRetryExhaustedError:
+        logger.warning("dormant_revival: Ollama 20回リトライでも復旧せずフォールバックへ")
+        msg_en = fallback_en
 
     msg_ja = client.translate_to_japanese(msg_en)
     return {

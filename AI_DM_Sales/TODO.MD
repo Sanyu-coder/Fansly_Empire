@@ -250,7 +250,7 @@ flowchart TD
 
 ### Phase 2: LLMクライアント・優先度キュー・不屈リトライ機構
 
-#### Ticket 2.1: Ollama直列化ロックの優先度キュー化とVRAM即解放設定
+#### Ticket 2.1: Ollama直列化ロックの優先度キュー化とVRAM即解放設定 `[x] 完了`
 - **対象ファイル**: `C:\Fansly_Empire\AI_DM_Sales\app\core\llm_client.py`
 - **具体的な実装内容**:
   1. `keep_alive` パラメータの導入:
@@ -267,7 +267,7 @@ flowchart TD
 
 ---
 
-#### Ticket 2.2: 長時間粘り強い不屈のリトライ（最大20回/40分）と滞留通知
+#### Ticket 2.2: 長時間粘り強い不屈のリトライ（最大20回/40分）と滞留通知 `[x] 完了`
 - **対象ファイル**: `C:\Fansly_Empire\AI_DM_Sales\app\core\llm_client.py`
 - **具体的な実装内容**:
   1. `execute_with_resilient_retry(task_func: Callable, task_name: str, max_retries: int = 20, retry_interval_sec: float = 120.0, alert_delay_sec: float = 900.0) -> Any` を実装する:
@@ -275,8 +275,12 @@ flowchart TD
      - Ollama接続失敗・GPUメモリ不足エラー（HTTP 500 / 503 / 接続拒否 / タイムアウト）が発生した場合、例外を外部に投げてメッセージを破棄するのではなく、未完了として保持し、`retry_interval_sec`（2分）待機して再試行する。
      - 経過時間が `alert_delay_sec`（15分 = 900秒）を超えた場合、`send_discord_alert()` を呼び出して「⚠️ VRAM競合またはOllama応答停止によりタスクが15分以上滞留中」と通知する（処理は諦めず最大20回まで継続）。
      - 最大試行回数（20回、約40分）に達しても復旧しない場合のみ、エラーを返し上位層でフォールバック返信またはアラート停止へ回す。
+  2. **実運用への組み込み（未実施・デグレ）**:
+     - `execute_with_resilient_retry()` を `sales_engine.py` / `followup_worker.py` / `dormant_revival_worker.py` / `optimizer_batch.py` / `profiler_service.py` の `generate_text()` / `generate_json()` 呼び出し箇所に組み込む。
+     - `_call_chat_completions()` は失敗時に例外を握りつぶして `None` を返す設計のため、`execute_with_resilient_retry()` に渡す `task_func` が `None` 返却を例外に変換するラッパーを必要とする。
 - **完了条件**:
   - Ollamaが停止している状態でモックテストを実行し、2分間隔でリトライが継続されること。タスクが途中で破棄されないこと。
+  - **実運用で `generate_text()` / `generate_json()` の呼び出しが全て `execute_with_resilient_retry()` で包まれていること。**
 
 ---
 

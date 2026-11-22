@@ -15,7 +15,7 @@ from app.core.database import (
     record_ppv_offer,
     upsert_fan_sales_state,
 )
-from app.core.llm_client import LLMClient, llm_client
+from app.core.llm_client import LLMClient, llm_client, execute_with_resilient_retry, LLMResilientRetryExhaustedError
 from app.services.character_loader import (
     get_char_paths,
     is_vault_item_sendable_to_customer,
@@ -1752,15 +1752,20 @@ class SalesEngine:
             "Write your next English DM reply now:"
         )
 
-        ai_reply = LLMClient.normalize_dm_newlines(
-            self.llm.generate_text(
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                temperature=0.72,
-                max_tokens=240,
-                fallback_text=fallback_reply,
+        try:
+            _raw_reply = execute_with_resilient_retry(
+                lambda: self.llm.generate_text(
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    temperature=0.72,
+                    max_tokens=240,
+                    fallback_text=fallback_reply,
+                ),
+                task_name="sales_engine_generate",
             )
-        )
+        except LLMResilientRetryExhaustedError:
+            _raw_reply = fallback_reply
+        ai_reply = LLMClient.normalize_dm_newlines(_raw_reply)
 
         nickname = (persona.get("user_nickname_default") or "babe").split("/")[0].strip()
         if next_phase == "5_Cooldown":

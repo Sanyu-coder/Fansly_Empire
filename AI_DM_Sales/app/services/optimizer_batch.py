@@ -16,7 +16,7 @@ from app.core.database import (
     save_new_playbook,
     save_system_stage_thresholds,
 )
-from app.core.llm_client import llm_client
+from app.core.llm_client import llm_client, execute_with_resilient_retry, LLMResilientRetryExhaustedError
 from app.services.character_loader import list_character_ids, load_dm_persona, save_settings
 
 logger = logging.getLogger("AI_DM_Sales.OptimizerBatch")
@@ -394,21 +394,32 @@ def run_playbook_optimization(
         '3. "rules_ja": Clear numbered Japanese explanation matching rules_text.\n'
         '4. "recommended_stage_thresholds": Optional object {"1_Icebreak": int, "2_Explore": int, "3_Lead_Pitch": int} (10-100).'
     )
-    llm_res = client.generate_json(
-        system_prompt=system_prompt,
-        user_prompt=(
-            f"{thresholds_context}\n\n{win_block}\n\n{loss_block}\n\n"
-            "Output optimization JSON reflecting conversation + S.E.L.L. stage score decision log analysis now:"
-        ),
-        default_data={
+    try:
+        llm_res = execute_with_resilient_retry(
+            lambda: client.generate_json(
+                system_prompt=system_prompt,
+                user_prompt=(
+                    f"{thresholds_context}\n\n{win_block}\n\n{loss_block}\n\n"
+                    "Output optimization JSON reflecting conversation + S.E.L.L. stage score decision log analysis now:"
+                ),
+                default_data={
+                    "analysis_summary_ja": fallback_summary_ja,
+                    "rules_text": fallback_rules_en,
+                    "rules_ja": fallback_rules_ja,
+                    "recommended_stage_thresholds": dict(current_thresholds),
+                },
+                temperature=0.45,
+                max_tokens=900,
+            ),
+            task_name="optimizer_generate_json",
+        )
+    except LLMResilientRetryExhaustedError:
+        llm_res = {
             "analysis_summary_ja": fallback_summary_ja,
             "rules_text": fallback_rules_en,
             "rules_ja": fallback_rules_ja,
             "recommended_stage_thresholds": dict(current_thresholds),
-        },
-        temperature=0.45,
-        max_tokens=900,
-    )
+        }
 
     rules_text = _normalize_rules_field(llm_res.get("rules_text") or llm_res.get("rules_en")) or fallback_rules_en
     rules_ja = _normalize_rules_field(llm_res.get("rules_ja")) or fallback_rules_ja
