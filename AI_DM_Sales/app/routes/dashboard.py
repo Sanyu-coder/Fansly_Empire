@@ -1204,5 +1204,128 @@ def api_system_window_closed():
     return jsonify({"ok": True, "action": "scheduled_clean_shutdown", "grace_sec": 3.0})
 
 
+# =====================================================================
+# [Ticket 5.3] 未登録ファン要望ランキング ＋ マスタータグ昇格
+# =====================================================================
+
+@dashboard_bp.route("/api/system/unmatched_needs", methods=["GET"])
+def api_system_unmatched_needs():
+    """
+    未登録ファン要望ランキングを返す。
+    Query params:
+      char_id: 指定キャラクターのみ (未指定なら全キャラクター集計)
+      limit:   件数 (デフォルト 20, 最大 100)
+    戻り値: {"ok": true, "items": [{keyword, count, latest_quote, fans: [...]}]}
+    """
+    from app.core.database import get_unmatched_needs_ranking
+    char_id = (request.args.get("char_id") or "").strip()
+    try:
+        limit = max(1, min(100, int(request.args.get("limit", 20))))
+    except Exception:
+        limit = 20
+
+    if char_id:
+        items = get_unmatched_needs_ranking(char_id, limit=limit)
+    else:
+        # 全キャラクター集計: 各キャラクターのランキングをマージ
+        from app.services.character_loader import list_character_ids
+        merged: Dict[str, Dict[str, Any]] = {}
+        for cid in list_character_ids():
+            for entry in get_unmatched_needs_ranking(cid, limit=100):
+                kw = str(entry.get("keyword") or "").strip().lower()
+                if not kw:
+                    continue
+                agg = merged.setdefault(
+                    kw,
+                    {"keyword": kw, "count": 0, "latest_quote": entry.get("latest_quote", ""), "fans": []},
+                )
+                for fid in entry.get("fans") or []:
+                    if fid and fid not in agg["fans"]:
+                        agg["fans"].append(fid)
+        for agg in merged.values():
+            agg["count"] = len(agg["fans"])
+        items = sorted(merged.values(), key=lambda e: (e["count"], e["keyword"]), reverse=True)[:limit]
+
+    return jsonify({"ok": True, "items": items})
+
+
+@dashboard_bp.route("/api/system/unmatched_needs/promote", methods=["POST"])
+def api_system_unmatched_needs_promote():
+    """
+    未登録ファン要望キーワードを master_tags.json の fan_wish カテゴリへ昇格する。
+    Body: {
+        "keyword": "rose_wine" (required, master_tags への新規タグ ID),
+        "name_ja": "ローズワイン" (optional, 表示名),
+        "llm_hint": "rose wine, wine, drinking" (optional, LLM 分類ヒント)
+    }
+    効果:
+      1. master_tags.json の fan_wish カテゴリへ新規タグを追加 (version は維持)。
+      2. unmatched_needs テーブルの該当キーワードを promoted_to_tag=1 にマーク。
+    """
+    import json as _json
+    from app.core.database import mark_unmatched_need_promoted
+    from app.services.tag_matcher import master_tags_path
+
+    data = request.get_json(silent=True) or {}
+    keyword = str(data.get("keyword") or "").strip().lower()
+    if not keyword:
+        return jsonify({"ok": False, "error": "keyword is required"}), 400
+
+    # 不正なタグ ID は拒否 (英数字・アンダースコアのみ)
+    import re as _re
+    if not _re.fullmatch(r"[a-z0-9_]{1,64}", keyword):
+        return jsonify({"ok": False, "error": "keyword must match [a-z0-9_]{1,64}"}), 400
+
+    path = master_tags_path()
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            tags_data = _json.load(f)
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"cannot read master_tags.json: {e}"}), 500
+
+    cats = tags_data.setdefault("categories", {})
+    fw = cats.setdefault("fan_wish", {"name_ja": "未登録ファン要望（自動検出・蓄積）", "tags": []})
+    existing_ids = {str(t.get("id") or "").strip() for t in (fw.get("tags") or [])}
+    if keyword in existing_ids:
+        return jsonify({"ok": False, "error": f"tag id '{keyword}' already exists in fan_wish"}), 409
+
+    fw["tags"].append(
+        {
+            "id": keyword,
+            "category": "fan_wish",
+            "name_ja": str(data.get("name_ja") or keyword).strip() or keyword,
+            "llm_hint": str(data.get("llm_hint") or "").strip() or f"{keyword}, fan request, new content wish",
+        }
+    )
+    # fan_wish カテゴリの既定タグ "fan_wish" がなければ追加 (LLM の出力先として必ず必要)
+    if "fan_wish" not in existing_ids:
+        fw["tags"].insert(
+            0,
+            {
+                "id": "fan_wish",
+                "category": "fan_wish",
+                "name_ja": "未登録のファン要望キーワード",
+                "llm_hint": "fan wants new content: request, wish, hope, want, please make, I would love, can you do, send me",
+            },
+        )
+
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            _json.dump(tags_data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"cannot write master_tags.json: {e}"}), 500
+
+    updated = mark_unmatched_need_promoted(keyword)
+
+    return jsonify(
+        {
+            "ok": True,
+            "promoted_rows": updated,
+            "tag_id": keyword,
+            "message": f"キーワード '{keyword}' を master_tags.json の fan_wish カテゴリへ昇格しました",
+        }
+    )
+
+
 
 

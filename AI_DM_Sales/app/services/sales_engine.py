@@ -1921,12 +1921,29 @@ def evaluate_state_transition(
     戻り値: (new_state, chosen_ppv_or_None, meta)
       meta: {"matched_tags", "reason_ja", "next_transition_condition", ...}
     """
-    from app.services.tag_matcher import match_ppv_deterministic
+    from app.services.tag_matcher import match_ppv_deterministic, extract_unmatched_needs, get_fan_wish_tag_ids
     from app.core import config as _cfg
 
-    matched_tags: List[str] = [str(t).strip().lstrip("#") for t in (ear_result.get("matched_tags") or []) if str(t).strip()]
+    raw_tags: List[str] = [str(t).strip().lstrip("#") for t in (ear_result.get("matched_tags") or []) if str(t).strip()]
     has_buy_intent = bool(ear_result.get("has_buy_intent"))
-    meta: Dict[str, Any] = {"matched_tags": matched_tags, "reason_ja": "", "next_transition_condition": ""}
+
+    # [Ticket 5.2] fan_wish カテゴリのタグは PPV マッチングに含めず、未登録要望として蓄積する
+    fan_wish_ids = set(get_fan_wish_tag_ids())
+    matched_tags = [t for t in raw_tags if t not in fan_wish_ids]
+    unmatched = [t for t in raw_tags if t in fan_wish_ids]
+    new_needs: List[Dict[str, Any]] = []
+    if unmatched:
+        try:
+            new_needs = extract_unmatched_needs(char_id, fan_id, unmatched, user_message, db_path=db_path)
+        except Exception:
+            new_needs = []
+
+    meta: Dict[str, Any] = {
+        "matched_tags": matched_tags,
+        "reason_ja": "",
+        "next_transition_condition": "",
+        "new_unmatched_needs": new_needs,
+    }
 
     # --- 危険ワード検知: 即座に Escalate_Stop ---
     msg_lower = (user_message or "").lower()

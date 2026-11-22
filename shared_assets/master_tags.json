@@ -1,6 +1,6 @@
 {
-  "version": 1,
-  "description": "カテゴリ別マスタータグ定義。耳役LLMのタグ分類・PPV決定論的マッチングの基準タグ辞書。",
+  "version": 2,
+  "description": "カテゴリ別マスタータグ定義。耳役LLMのタグ分類・PPV決定論的マッチングの基準タグ辞書。v2: fan_wish カテゴリ追加（未登録ファン要望の定量化用）。",
   "categories": {
     "play": {
       "name_ja": "プレイ・属性",
@@ -164,6 +164,17 @@
           "category": "situation",
           "name_ja": "POV・一人称視点",
           "llm_hint": "pov, point of view, first person, camera angle, looking at me"
+        }
+      ]
+    },
+    "fan_wish": {
+      "name_ja": "未登録ファン要望（自動検出・蓄積）",
+      "tags": [
+        {
+          "id": "fan_wish",
+          "category": "fan_wish",
+          "name_ja": "未登録のファン要望キーワード",
+          "llm_hint": "fan wants new content: request, wish, hope, want, please make, I would love, can you do, send me"
         }
       ]
     }

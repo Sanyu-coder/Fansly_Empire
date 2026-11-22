@@ -231,3 +231,72 @@ def match_ppv_deterministic(
     # スコア降順、同点なら ladder_step が近いもの、最後に ppv_id で決定論的ソート
     scored.sort(key=lambda x: (-x["score"], abs(int(x["rec"].get("ladder_step") or 1) - int(ladder_step)), str(x["rec"].get("ppv_id") or "")))
     return dict(scored[0]["rec"])
+
+
+# ---------------------------------------------------------------------------
+# Ticket 5.2 / 5.3: 未登録ファン要望の蓄積
+# ---------------------------------------------------------------------------
+
+def get_fan_wish_tag_ids() -> List[str]:
+    """
+    fan_wish カテゴリのタグ ID 一覧を返す。
+    耳役LLMが PPV 在庫に紐づかない要望をこのカテゴリのタグ ID で出力し、
+    Python 側が record_unmatched_need へ蓄積する。
+    """
+    data = load_master_tags()
+    cats = data.get("categories") or {}
+    fw = cats.get("fan_wish") or {}
+    ids: List[str] = []
+    for tag in (fw.get("tags") or []):
+        tid = str(tag.get("id") or "").strip()
+        if tid:
+            ids.append(tid)
+    return ids
+
+
+def extract_unmatched_needs(
+    char_id: str,
+    fan_id: str,
+    matched_tags: List[str],
+    raw_message: str,
+    db_path: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """
+    耳役LLMが fan_wish カテゴリのタグ ID を返した場合、PPV 在庫に紐づかない
+    未登録要望として unmatched_needs テーブルへ蓄積する。
+
+    戻り値: 新規に蓄積できた要望のリスト
+        [{"keyword": "fan_wish", "raw_quote": "..."}]
+    既存の重複 (UNIQUE char_id, fan_id, keyword) 場合は空リスト。
+
+    備考:
+      - matched_tags 内の fan_wish ID は PPV マッチングでは常に無効（在庫に
+        紐づかない）ため、match_ppv_deterministic 側は自然に 0 一致で除外される。
+      - キーワードは fan_wish カテゴリのタグ ID 自体 (例: "fan_wish") を使う。
+        文脈は raw_quote に格納し、人間が dashboard から確認して新規タグに昇格させる。
+    """
+    fan_wish_ids = set(get_fan_wish_tag_ids())
+    if not fan_wish_ids:
+        return []
+
+    from app.core.database import record_unmatched_need
+
+    results: List[Dict[str, Any]] = []
+    seen: set = set()
+    for tid in matched_tags or []:
+        t = str(tid).strip().lstrip("#")
+        if t in fan_wish_ids and t not in seen:
+            seen.add(t)
+            try:
+                inserted = record_unmatched_need(
+                    char_id=char_id,
+                    fan_id=fan_id,
+                    keyword=t,
+                    raw_quote=str(raw_message or ""),
+                    db_path=db_path,
+                )
+            except Exception:
+                inserted = False
+            if inserted:
+                results.append({"keyword": t, "raw_quote": str(raw_message or "")})
+    return results

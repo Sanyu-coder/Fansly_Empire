@@ -2904,7 +2904,52 @@ def mark_unmatched_need_promoted(keyword: str, db_path: Optional[str] = None) ->
         conn.close()
 
 
+def get_system_setting(setting_key: str, db_path: Optional[str] = None) -> Optional[str]:
+    """system_settings テーブルから単一の設定値 (文字列) を取得する。無ければ None。"""
+    conn = get_db_connection(db_path)
+    try:
+        row = conn.execute(
+            "SELECT setting_value FROM system_settings WHERE setting_key = ?;",
+            (str(setting_key),),
+        ).fetchone()
+        if row is None:
+            return None
+        return str(row["setting_value"] or "")
+    except Exception:
+        return None
+    finally:
+        conn.close()
 
+
+def save_system_setting(setting_key: str, setting_value: str, db_path: Optional[str] = None) -> bool:
+    """system_settings テーブルへ単一の設定値を UPSERT する。"""
+    conn = get_db_connection(db_path)
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS system_settings (
+                setting_key TEXT PRIMARY KEY,
+                setting_value TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO system_settings (setting_key, setting_value, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(setting_key) DO UPDATE SET
+                setting_value = excluded.setting_value,
+                updated_at = excluded.updated_at;
+            """,
+            (str(setting_key), str(setting_value), _now_iso()),
+        )
+        conn.commit()
+        return True
+    except Exception:
+        return False
+    finally:
+        conn.close()
 
 
 

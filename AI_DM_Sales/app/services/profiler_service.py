@@ -463,6 +463,21 @@ def classify_fan_intent_and_tags(
                         "llm_hint": tag.get("llm_hint"),
                     }
                 )
+    # [Ticket 5.2] fan_wish カテゴリのタグ ID を必ず候補に含める
+    # （PPV 在庫に紐づかない要望を LLM に fan_wish タグ ID で出力させ、
+    #  Python 側が unmatched_needs へ蓄積する）
+    from app.services.tag_matcher import get_fan_wish_tag_ids
+    existing_ids = {c.get("id") for c in candidates}
+    for fw_id in get_fan_wish_tag_ids():
+        if fw_id not in existing_ids:
+            candidates.append(
+                {
+                    "id": fw_id,
+                    "category": "fan_wish",
+                    "name_ja": "未登録のファン要望キーワード",
+                    "llm_hint": "fan wants NEW content that has no existing PPV: use this tag id when the request matches no candidate above",
+                }
+            )
 
     tag_lines = [
         f"- {c['id']} ({c.get('name_ja') or c['id']}): {c.get('llm_hint') or ''}"
@@ -490,10 +505,11 @@ def classify_fan_intent_and_tags(
         "2. has_buy_intent: true ONLY if the fan explicitly asks to see/buy/unlock content "
         "(e.g. 'show me', 'how much', 'want to buy', 'send it').\n"
         "3. unmatched_needs: English keywords for fetishes/outfits/situations the fan wants that are "
-        "NOT in the candidate tag list.\n"
+        "NOT in the candidate tag list. If the fan wants NEW content that has no existing PPV, "
+        "ALSO add the tag id 'fan_wish' to matched_tags so the system can log it as an unmatched need.\n"
         "4. reasoning_ja: one short Japanese sentence explaining the decision.\n"
         "Output JSON schema:\n"
-        '{"matched_tags": ["lingerie"], "has_buy_intent": true, "unmatched_needs": ["glasses"], "reasoning_ja": "..."}'
+        '{"matched_tags": ["lingerie", "fan_wish"], "has_buy_intent": true, "unmatched_needs": ["glasses"], "reasoning_ja": "..."}'
     )
     user_prompt = (
         f"Candidate master tags (id (ja_name): llm_hint):\n{tag_block}\n\n"
