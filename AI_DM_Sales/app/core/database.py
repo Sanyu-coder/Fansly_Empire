@@ -118,6 +118,11 @@ def init_db(db_path: Optional[str] = None, seed_demo: bool = False) -> str:
             cur.execute("ALTER TABLE fans ADD COLUMN manual_hold_at TEXT;")
         if "decision_log_json" not in fan_cols:
             cur.execute("ALTER TABLE fans ADD COLUMN decision_log_json TEXT DEFAULT '[]';")
+        # 新ステートマシン (Ticket 1.2): 往復カウント・最終PPV提案時刻 を追加
+        if "state_step_turns" not in fan_cols:
+            cur.execute("ALTER TABLE fans ADD COLUMN state_step_turns INTEGER DEFAULT 0;")
+        if "last_pitch_at" not in fan_cols:
+            cur.execute("ALTER TABLE fans ADD COLUMN last_pitch_at TEXT;")
 
         # 2.4 dm_messages (content: 英語原文, content_ja: 日本語訳, decision_log_json: AI検討プロセスログ, ppv添付情報)
         cur.execute(
@@ -242,6 +247,11 @@ def init_db(db_path: Optional[str] = None, seed_demo: bool = False) -> str:
             cur.execute("ALTER TABLE ppv_vault ADD COLUMN pitch_hint TEXT DEFAULT '';")
         if "updated_at" not in pv_cols:
             cur.execute("ALTER TABLE ppv_vault ADD COLUMN updated_at TEXT;")
+        # 新PPV選定 (Ticket 1.2): 汎用おすすめフラグ・カテゴリ別タグJSON を追加
+        if "is_general" not in pv_cols:
+            cur.execute("ALTER TABLE ppv_vault ADD COLUMN is_general INTEGER DEFAULT 0;")
+        if "category_tags_json" not in pv_cols:
+            cur.execute("ALTER TABLE ppv_vault ADD COLUMN category_tags_json TEXT DEFAULT '{}';")
 
         # 2.8 system_settings (返信待機時間範囲 min_reply_delay_sec / max_reply_delay_sec 等の共通・システム設定)
         cur.execute(
@@ -282,12 +292,58 @@ def init_db(db_path: Optional[str] = None, seed_demo: bool = False) -> str:
             "INSERT OR IGNORE INTO system_settings (setting_key, setting_value, updated_at) VALUES (?, ?, ?);",
             ("stage_threshold_lead_pitch", "85", now_init),
         )
+        # 新ステートマシン・Discord通知・DM推論個別設定 (Ticket 1.2)
+        cur.execute(
+            "INSERT OR IGNORE INTO system_settings (setting_key, setting_value, updated_at) VALUES (?, ?, ?);",
+            ("discord_webhook_url", "", now_init),
+        )
+        cur.execute(
+            "INSERT OR IGNORE INTO system_settings (setting_key, setting_value, updated_at) VALUES (?, ?, ?);",
+            ("debounce_seconds", "18", now_init),
+        )
+        cur.execute(
+            "INSERT OR IGNORE INTO system_settings (setting_key, setting_value, updated_at) VALUES (?, ?, ?);",
+            ("tag_collect_target_count", "1", now_init),
+        )
+        cur.execute(
+            "INSERT OR IGNORE INTO system_settings (setting_key, setting_value, updated_at) VALUES (?, ?, ?);",
+            ("tag_collect_max_turns", "5", now_init),
+        )
+        cur.execute(
+            "INSERT OR IGNORE INTO system_settings (setting_key, setting_value, updated_at) VALUES (?, ?, ?);",
+            ("cooldown_turns_threshold", "3", now_init),
+        )
+        cur.execute(
+            "INSERT OR IGNORE INTO system_settings (setting_key, setting_value, updated_at) VALUES (?, ?, ?);",
+            ("dm_ollama_base_url", "", now_init),
+        )
+        cur.execute(
+            "INSERT OR IGNORE INTO system_settings (setting_key, setting_value, updated_at) VALUES (?, ?, ?);",
+            ("dm_ollama_model_name", "", now_init),
+        )
+
+        # 2.9 unmatched_needs (Ticket 1.2: 耳役LLMが抽出した未登録ファン要望の蓄積テーブル)
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS unmatched_needs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                char_id TEXT NOT NULL,
+                fan_id TEXT NOT NULL,
+                keyword TEXT NOT NULL,
+                raw_quote TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                promoted_to_tag INTEGER DEFAULT 0,
+                UNIQUE(char_id, fan_id, keyword)
+            );
+            """
+        )
 
         cur.execute("CREATE INDEX IF NOT EXISTS idx_fans_char_contact ON fans(char_id, last_contact_at DESC);")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_dm_messages_fan_char ON dm_messages(char_id, fan_id, msg_id ASC);")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_ppv_tx_char_ppv ON ppv_transactions(char_id, ppv_id);")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_playbooks_char_active ON sales_playbooks(char_id, ab_group, is_active);")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_ppv_vault_char_step ON ppv_vault(char_id, ladder_step, is_active);")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_unmatched_needs_char_kw ON unmatched_needs(char_id, keyword);")
 
         conn.commit()
     finally:
@@ -2683,6 +2739,162 @@ def repair_false_positive_transactions(db_path: Optional[str] = None) -> Dict[st
     finally:
         conn.close()
     return {"repaired_ppv_count": repaired_ppv, "removed_phantom_tips_count": removed_phantom_tips}
+
+
+# ==============================================================================
+# unmatched_needs ヘルパー (Ticket 1.2)
+# 耳役LLMが抽出した「マスタータグに未登録のファン要望」の蓄積・ランキング・昇格処理
+# ==============================================================================
+
+def record_unmatched_need(
+    char_id: str,
+    fan_id: str,
+    keyword: str,
+    raw_quote: str,
+    db_path: Optional[str] = None,
+) -> bool:
+    """
+    未登録のファン要望キーワードを unmatched_needs テーブルへ蓄積する。
+    UNIQUE(char_id, fan_id, keyword) により同一ファン・同一キーワードの二重登録は抑制される。
+    新規に挿入できた場合は True、既存だった場合は False を返す。
+    """
+    keyword = str(keyword or "").strip().lower()
+    if not keyword:
+        return False
+    conn = get_db_connection(db_path)
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS unmatched_needs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                char_id TEXT NOT NULL,
+                fan_id TEXT NOT NULL,
+                keyword TEXT NOT NULL,
+                raw_quote TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                promoted_to_tag INTEGER DEFAULT 0,
+                UNIQUE(char_id, fan_id, keyword)
+            );
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_unmatched_needs_char_kw ON unmatched_needs(char_id, keyword);",
+        )
+        now_str = _now_iso()
+        cur.execute(
+            """
+            INSERT OR IGNORE INTO unmatched_needs
+                (char_id, fan_id, keyword, raw_quote, created_at, promoted_to_tag)
+            VALUES (?, ?, ?, ?, ?, 0);
+            """,
+            (str(char_id), str(fan_id), keyword, str(raw_quote or ""), now_str),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+    except Exception:
+        return False
+    finally:
+        conn.close()
+
+
+def get_unmatched_needs_ranking(
+    char_id: str,
+    limit: int = 20,
+    db_path: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """
+    指定キャラクターの未登録要望を「要望ファン数」降順でランキングする。
+    各要素: {keyword, count, latest_quote, fans: [fan_id, ...]}
+    """
+    conn = get_db_connection(db_path)
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS unmatched_needs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                char_id TEXT NOT NULL,
+                fan_id TEXT NOT NULL,
+                keyword TEXT NOT NULL,
+                raw_quote TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                promoted_to_tag INTEGER DEFAULT 0,
+                UNIQUE(char_id, fan_id, keyword)
+            );
+            """
+        )
+        rows = cur.execute(
+            """
+            SELECT keyword, fan_id, raw_quote, created_at
+            FROM unmatched_needs
+            WHERE char_id = ? AND promoted_to_tag = 0
+            ORDER BY created_at DESC;
+            """,
+            (str(char_id),),
+        ).fetchall()
+        ranking: Dict[str, Dict[str, Any]] = {}
+        for r in rows:
+            kw = str(r["keyword"] or "").strip().lower()
+            if not kw:
+                continue
+            entry = ranking.setdefault(
+                kw,
+                {
+                    "keyword": kw,
+                    "count": 0,
+                    "latest_quote": str(r["raw_quote"] or ""),
+                    "fans": [],
+                },
+            )
+            fid = str(r["fan_id"] or "")
+            if fid and fid not in entry["fans"]:
+                entry["fans"].append(fid)
+        for entry in ranking.values():
+            entry["count"] = len(entry["fans"])
+        result = sorted(ranking.values(), key=lambda e: (e["count"], e["keyword"]), reverse=True)
+        return result[: max(1, int(limit))]
+    except Exception:
+        return []
+    finally:
+        conn.close()
+
+
+def mark_unmatched_need_promoted(keyword: str, db_path: Optional[str] = None) -> int:
+    """
+    指定キーワードの未登録要望を「マスタータグへ昇格済み」(promoted_to_tag=1) とマークする。
+    対象行の更新数を返す。
+    """
+    keyword = str(keyword or "").strip().lower()
+    if not keyword:
+        return 0
+    conn = get_db_connection(db_path)
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS unmatched_needs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                char_id TEXT NOT NULL,
+                fan_id TEXT NOT NULL,
+                keyword TEXT NOT NULL,
+                raw_quote TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                promoted_to_tag INTEGER DEFAULT 0,
+                UNIQUE(char_id, fan_id, keyword)
+            );
+            """
+        )
+        cur.execute(
+            "UPDATE unmatched_needs SET promoted_to_tag = 1 WHERE keyword = ? AND promoted_to_tag = 0;",
+            (keyword,),
+        )
+        conn.commit()
+        return cur.rowcount
+    except Exception:
+        return 0
+    finally:
+        conn.close()
 
 
 

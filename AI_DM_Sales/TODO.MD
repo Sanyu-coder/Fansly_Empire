@@ -141,7 +141,7 @@ flowchart TD
 
 ### Phase 1: DBスキーマ・マスター設定・インフラ基盤
 
-#### Ticket 1.1: カテゴリ別マスタータグ定義ファイルの作成
+#### Ticket 1.1: カテゴリ別マスタータグ定義ファイルの作成 `[x] 完了`
 - **対象ファイル**: `C:\Fansly_Empire\shared_assets\master_tags.json`（新規作成）
 - **具体的な実装内容**:
   1. `shared_assets/master_tags.json` を新規作成する。
@@ -164,7 +164,7 @@ flowchart TD
 
 ---
 
-#### Ticket 1.2: SQLite DBマイグレーション（テーブル拡張・新規テーブル追加・PRAGMA安全性確保）
+#### Ticket 1.2: SQLite DBマイグレーション（テーブル拡張・新規テーブル追加・PRAGMA安全性確保） `[x] 完了`
 - **対象ファイル**: `C:\Fansly_Empire\AI_DM_Sales\app\core\database.py`（※局所編集ルール厳守: `init_db()` 付近のみを編集）
 - **具体的な実装内容**:
   1. `init_db()` 関数内に、既存テーブルのマイグレーションと新規テーブル作成を追加する。
@@ -217,7 +217,7 @@ flowchart TD
 
 ---
 
-#### Ticket 1.3: Discord Webhook通知モジュールの実装
+#### Ticket 1.3: Discord Webhook通知モジュールの実装 `[x] 完了`
 - **対象ファイル**: `C:\Fansly_Empire\AI_DM_Sales\app\core\discord_notifier.py`（新規作成）
 - **具体的な実装内容**:
   1. `app/core/discord_notifier.py` を新規作成する。
@@ -231,7 +231,7 @@ flowchart TD
 
 ---
 
-#### Ticket 1.4: 異常終了時自動再起動ラッパーの実装
+#### Ticket 1.4: 異常終了時自動再起動ラッパーの実装 `[x] 完了`
 - **対象ファイル**: 
   1. `C:\Fansly_Empire\AI_DM_Sales\run_dm_sales_起動.bat`
   2. `C:\Fansly_Empire\AI_DM_Sales\run_dm_sales_watcher.py`（新規作成）

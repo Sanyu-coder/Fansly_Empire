@@ -1,0 +1,171 @@
+{
+  "version": 1,
+  "description": "カテゴリ別マスタータグ定義。耳役LLMのタグ分類・PPV決定論的マッチングの基準タグ辞書。",
+  "categories": {
+    "play": {
+      "name_ja": "プレイ・属性",
+      "tags": [
+        {
+          "id": "bdsm",
+          "category": "play",
+          "name_ja": "BDSM",
+          "llm_hint": "bdsm, bondage, discipline, sadism, masochism, rope, ties, restraint"
+        },
+        {
+          "id": "worship",
+          "category": "play",
+          "name_ja": "worship・礼拝",
+          "llm_hint": "worship, foot worship, worship me, adore, devotional"
+        },
+        {
+          "id": "gfe",
+          "category": "play",
+          "name_ja": "GFE・ガールフレンド体験",
+          "llm_hint": "gfe, girlfriend experience, cozy, sweet, cute, girlfriend, bf, gf, couple"
+        },
+        {
+          "id": "femdom",
+          "category": "play",
+          "name_ja": "フェムド・女性支配",
+          "llm_hint": "femdom, female domination, dominant girl, he is my sub, i control you"
+        },
+        {
+          "id": "submissive",
+          "category": "play",
+          "name_ja": "サブミッシブ・従順",
+          "llm_hint": "submissive, sub, obedient, please, my master, your orders, i obey"
+        },
+        {
+          "id": "dirty_talk",
+          "category": "play",
+          "name_ja": "ダーティートーク",
+          "llm_hint": "dirty talk, naughty words, filthy, explicit talk, sexual words"
+        },
+        {
+          "id": "humiliation",
+          "category": "play",
+          "name_ja": "ヒューミリエーション・辱め",
+          "llm_hint": "humiliation, degrade, insult, bad boy, you are pathetic, make you feel small"
+        },
+        {
+          "id": "teasing",
+          "category": "play",
+          "name_ja": "ティージング・からかい",
+          "llm_hint": "teasing, tease, deny, wait, patience, i will not let you, almost"
+        }
+      ]
+    },
+    "body_outfit": {
+      "name_ja": "パーツ・衣装",
+      "tags": [
+        {
+          "id": "lingerie",
+          "category": "body_outfit",
+          "name_ja": "ランジェリー・下着",
+          "llm_hint": "lingerie, bra, panties, lace underwear, undergarments, sexy underwear"
+        },
+        {
+          "id": "cosplay",
+          "category": "body_outfit",
+          "name_ja": "コスプレ",
+          "llm_hint": "cosplay, costume, character, anime, dress up, cosplay outfit"
+        },
+        {
+          "id": "bikini",
+          "category": "body_outfit",
+          "name_ja": "ビキニ",
+          "llm_hint": "bikini, swimsuit, pool, beach, two piece, swimwear"
+        },
+        {
+          "id": "stockings",
+          "category": "body_outfit",
+          "name_ja": "ストッキング",
+          "llm_hint": "stockings, thigh high, sheer, pantyhose, fishnets, stockings on legs"
+        },
+        {
+          "id": "feet",
+          "category": "body_outfit",
+          "name_ja": "足フェチ",
+          "llm_hint": "feet, feet fetish, toes, soles, foot, my feet, foot massage"
+        },
+        {
+          "id": "bunny",
+          "category": "body_outfit",
+          "name_ja": "バニー・ウサギ",
+          "llm_hint": "bunny, bunny suit, bunny girl, rabbit, ears, bunny costume"
+        },
+        {
+          "id": "latex",
+          "category": "body_outfit",
+          "name_ja": "ラテックス",
+          "llm_hint": "latex, rubber, PVC, shiny, latex suit, latex bodysuit"
+        },
+        {
+          "id": "glasses",
+          "category": "body_outfit",
+          "name_ja": "めがね",
+          "llm_hint": "glasses, eyeglasses, specs, spectacles, wearing glasses"
+        },
+        {
+          "id": "maid",
+          "category": "body_outfit",
+          "name_ja": "メイド",
+          "llm_hint": "maid, maid outfit, maid dress, apron, maid costume, housekeeping"
+        }
+      ]
+    },
+    "situation": {
+      "name_ja": "シチュエーション",
+      "tags": [
+        {
+          "id": "bedroom",
+          "category": "situation",
+          "name_ja": "寝室",
+          "llm_hint": "bedroom, bed, bedroom scene, on the bed, nightstand"
+        },
+        {
+          "id": "shower_bath",
+          "category": "situation",
+          "name_ja": "シャワー・お風呂",
+          "llm_hint": "shower, bath, bathtub, steamy shower, wet, in the bathroom"
+        },
+        {
+          "id": "outdoor",
+          "category": "situation",
+          "name_ja": "アウトドア・屋外",
+          "llm_hint": "outdoor, outside, outdoors, park, street, public, nature"
+        },
+        {
+          "id": "hotel",
+          "category": "situation",
+          "name_ja": "ホテル",
+          "llm_hint": "hotel, hotel room, business trip, hotel stay, suite"
+        },
+        {
+          "id": "car",
+          "category": "situation",
+          "name_ja": "車内",
+          "llm_hint": "car, in the car, parking lot, car scene, back seat"
+        },
+        {
+          "id": "morning",
+          "category": "situation",
+          "name_ja": "朝",
+          "llm_hint": "morning, good morning, wake up, breakfast, morning light, just woke up"
+        },
+        {
+          "id": "late_night",
+          "category": "situation",
+          "name_ja": "深夜",
+          "llm_hint": "late night, midnight, 3am, can't sleep, insomnia, late night call"
+        },
+        {
+          "id": "pov",
+          "category": "situation",
+          "name_ja": "POV・一人称視点",
+          "llm_hint": "pov, point of view, first person, camera angle, looking at me"
+        }
+      ]
+    }
+  }
+}

@@ -6,7 +6,8 @@ powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { (
 timeout /t 1 /nobreak >nul
 
 :: 2. サーバーを先にバックグラウンドで起動（ポート 5051）
-start "" /B python C:\Fansly_Empire\AI_DM_Sales\run_dm_sales.py
+::    異常終了時自動再起動ウォッチャー経由で起動（クラッシュ検知・5秒待機・自動再起動・暴走防止）
+start "" /B python C:\Fansly_Empire\AI_DM_Sales\run_dm_sales_watcher.py
 
 :: サーバーの立ち上がりを2秒待つ
 timeout /t 2 /nobreak >nul
