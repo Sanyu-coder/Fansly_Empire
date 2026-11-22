@@ -427,6 +427,8 @@ class SalesEngine:
         - 単なる 5_Cooldown 滞在だけでは発動せず、明確な強い称賛・甘え・特別リクエスト・購入直後絶賛がある時のみ候補とする。
         - ※最終確定は LLM 生成後の verify_tip_request_in_reply() を通過した場合のみ。
         """
+        # [Ticket 4.1] チップ誘導フックは廃止：常にトリガーしない（早期リターン）
+        return {"triggered": False, "suggested_amount_usd": 0.0, "reason": None}
         raw_msg = user_message or ""
         msg_lower = raw_msg.lower()
         spent = float(total_spent_usd or 0.0)
@@ -784,88 +786,18 @@ class SalesEngine:
                 "stage_thresholds": thresholds,
             }
 
-        prev_score = self._resolve_previous_stage_score(
-            char_id=char_id,
-            fan_id=fan_id,
-            norm_phase=norm_phase,
-            thresholds=thresholds,
-            explicit_stage_score=previous_score,
-            existing_profile=existing_profile,
-            recent_messages=recent_messages,
-            current_tier=current_tier,
-            total_spent_usd=total_spent_usd,
-            db_path=db_path,
-        )
-
-        earned_pts, reason_ja, sig = self.evaluate_turn_stage_points(
-            user_message=user_message,
-            current_tier=current_tier,
-            total_spent_usd=total_spent_usd,
-        )
-
-        spent = float(total_spent_usd or 0.0)
-        is_trusted_or_paid = bool(sig.get("is_trusted_or_paid"))
-        wants_immediate_buy = bool(sig.get("wants_immediate_buy"))
-        has_objection = bool(sig.get("has_objection"))
-        turns = max(1, int(turn_count or 1))
-
-        promoted = False
+        # [Ticket 4.1] S.E.L.L. 点数制のステージ遷移は廃止：
+        # 点数計算・閾値判定を行わず、フェーズ遷移は新ステートマシン (Ticket 4.5 evaluate_state_transition) へ委譲する。
+        # 本関数は後方互換のために旧ステート名の「原形保持」のみを返す（スコアは0固定）。
         new_stage = norm_phase
-        new_score = max(0, min(100, prev_score + earned_pts))
-
-        if has_objection and norm_phase in ("3_Lead_Pitch", "4_Lock_Close"):
-            new_stage = "5_Cooldown"
-            new_score = max(0, t_ice - 5)
-            reason_ja = f"{reason_ja} → 押し売り回避のため 5_Cooldown へ移行"
-        elif norm_phase == "4_Lock_Close":
-            new_stage = "5_Cooldown"
-            new_score = t_ice
-            reason_ja = f"{reason_ja} → クロージング後の余韻フェーズ (5_Cooldown) へ移行"
-        elif norm_phase == "5_Cooldown":
-            if wants_immediate_buy:
-                new_stage = "3_Lead_Pitch"
-                promoted = True
-                new_score = max(t_exp, min(max(t_exp, t_pitch - 5), t_exp + 10))
-                reason_ja = f"{reason_ja} → 再購買リクエスト検知により 3_Lead_Pitch へ再突入"
-            else:
-                new_stage = "2_Explore"
-                step_span = max(10, t_exp - t_ice)
-                new_score = min(max(t_ice, t_exp - 5), t_ice + min(max(0, earned_pts), max(5, step_span // 2)))
-                reason_ja = f"{reason_ja} → クールダウン完了・2_Explore でニーズ再探索を開始"
-        elif norm_phase == "1_Icebreak":
-            if is_trusted_or_paid and (wants_immediate_buy or spent >= self.WHALE_SPENT_THRESHOLD_USD):
-                new_stage = "3_Lead_Pitch"
-                promoted = True
-                new_score = max(t_exp, min(max(t_exp, t_pitch - 5), max(new_score, t_exp + 5)))
-                reason_ja = f"{reason_ja} → 有料VIP・高意欲につき 3_Lead_Pitch へ優先突破！"
-            elif not is_trusted_or_paid and turns <= 1 and t_ice >= 35 and new_score >= t_ice:
-                # 通常閾値(>=35pt)での新規未課金1往復目はラポール形成を優先し、閾値直前でホールド
-                new_stage = "1_Icebreak"
-                new_score = max(0, t_ice - 5)
-                earned_pts = max(0, new_score - prev_score)
-                reason_ja = f"{reason_ja}（初回ラポール優先のため {new_score}/{t_ice}pt で待機）"
-            elif new_score >= t_ice:
-                new_stage = "2_Explore"
-                promoted = True
-                if t_exp > t_ice:
-                    new_score = max(t_ice, min(new_score, t_exp - 5))
-                reason_ja = f"{reason_ja} → 閾値 {t_ice}pt 到達により 2_Explore へ突破！"
-        elif norm_phase == "2_Explore":
-            if new_score >= t_exp:
-                new_stage = "3_Lead_Pitch"
-                promoted = True
-                if t_pitch > t_exp:
-                    new_score = max(t_exp, min(new_score, t_pitch - 5))
-                reason_ja = f"{reason_ja} → 閾値 {t_exp}pt 到達により 3_Lead_Pitch へ突破！"
-        elif norm_phase == "3_Lead_Pitch":
-            if new_score >= t_pitch:
-                new_stage = "4_Lock_Close"
-                promoted = True
-                new_score = min(100, max(t_pitch, new_score))
-                reason_ja = f"{reason_ja} → 閾値 {t_pitch}pt 到達により 4_Lock_Close へ突破！"
+        new_score = 0
+        prev_score = 0
+        earned_pts = 0
+        promoted = False
+        reason_ja = "S.E.L.L. ポイント制は廃止済み。遷移判定は新ステートマシンへ委譲されています。"
 
         target_next_stage, target_threshold = self.get_stage_target_meta(new_stage, thresholds)
-        remaining = max(0, int(target_threshold) - int(new_score))
+        remaining = int(target_threshold)
 
         return {
             "previous_stage": norm_phase,
@@ -1150,7 +1082,8 @@ class SalesEngine:
         """
         persona = persona or load_dm_persona(char_id)
         plans = plans or load_plans(char_id)
-        active_pb = playbook or get_active_playbook_for_group(char_id, ab_group=ab_group, db_path=db_path)
+        # [Ticket 4.1] A/Bテストの動的プレイブック挿入は廃止：常に空プロンプトルールで固定システムプロンプトに統一する
+        active_pb: Dict[str, Any] = {}
 
         display_name = persona.get("display_name") or char_id
         tone_and_style = persona.get("tone_and_style") or "Alluring, playful, affectionate."
@@ -1175,10 +1108,11 @@ class SalesEngine:
             else ""
         )
 
-        tip_active = bool(tip_hook and tip_hook.get("triggered"))
-        tip_amount = float((tip_hook or {}).get("suggested_amount_usd") or 5.0)
+        # [Ticket 4.1] チップ誘導フックは廃止：常に無効化しプロンプトに挿入しない
+        tip_active = False
+        tip_amount = 0.0
         tip_block = ""
-        if tip_active:
+        if False:
             tip_block = (
                 f"\n\n[Tip / Appreciation Hook Directive (ACTIVE: Suggest ${int(tip_amount)} Tip)]\n"
                 f"- Trigger Context: {(tip_hook or {}).get('reason')}\n"
@@ -1618,145 +1552,84 @@ class SalesEngine:
             persist_db=persist_db and bool(fan_id),
         )
 
-        # Step 4: 階段式PPV選定 ＆ 好みタグ照合 ＆ 動的プライシング
-        recommended_ppv, pricing_mode = self.select_ppv_and_price(
-            char_id=char_id,
-            fan_id=fan_id,
-            total_spent_usd=total_spent_usd,
-            current_tier=current_tier,
-            purchased_ppv_ids=purchased_ppv_ids,
-            plans=plans,
-            settings=settings,
-            vault_items=vault_items,
-            psych_profile=psych_profile,
-            user_message=user_message,
-            db_path=db_path,
+        # ===== [Ticket 4.5] 新ステートマシンフロー =====
+        from app.services import profiler_service as _prof
+        from app.services.profiler_service import (
+            classify_fan_intent_and_tags,
+            update_fan_facts_and_summary,
         )
 
-        # Step 5: S.E.L.L. 突破スコア加算 ＆ ステージ遷移判定 ＆ チップ誘導フック候補判定
+        # Step 4: 耳役LLM でタグ分類・購入意向判定・NEED抽出
+        ear_result = classify_fan_intent_and_tags(
+            char_id=char_id,
+            recent_messages=msg_history,
+            existing_matched_tags=(psych_profile.get("matched_tags") or []),
+            db_path=db_path,
+            persist_needs=persist_db and bool(fan_id),
+            fan_id=fan_id,
+        )
+        psych_profile["matched_tags"] = _prof._normalize_str_list(
+            list(dict.fromkeys((psych_profile.get("matched_tags") or []) + (ear_result.get("matched_tags") or []))),
+            max_items=16,
+        )
+
+        # Step 5: [Ticket 4.4] 構造化長期記憶 (facts / conversation_summary) をマージ更新
+        memory_profile = update_fan_facts_and_summary(
+            char_id=char_id,
+            fan_id=fan_id or "sim_test_fan",
+            recent_messages=msg_history,
+            existing_profile=psych_profile,
+            db_path=db_path,
+        )
+        psych_profile.update(memory_profile)
+
+        # Step 5b: 決定論的ステート遷移判定
         turn_count = max(1, len([m for m in msg_history if m.get("sender") == "fan"]))
-        stage_prog = self.evaluate_stage_progression(
-            current_phase=norm_input_stage,
-            user_message=user_message,
-            current_tier=current_tier,
-            total_spent_usd=total_spent_usd,
-            consecutive_ppv_ignored=consecutive_ppv_ignored,
-            turn_count=turn_count,
-            has_available_ppv=recommended_ppv is not None,
+        state_step_turns = int(psych_profile.get("_state_step_turns") or 0)
+        new_state, recommended_ppv, state_meta = evaluate_state_transition(
             char_id=char_id,
             fan_id=fan_id,
-            previous_score=stage_score,
-            existing_profile=existing_profile_json,
-            recent_messages=recent_messages,
-            stage_thresholds=active_thresholds,
-            settings=settings,
-            db_path=db_path,
-        )
-        next_phase = str(stage_prog["current_stage"])
-
-        # アイスブレイク・エクスプロア・クールダウンではPPV売りつけをハードブロック
-        if next_phase not in ("3_Lead_Pitch", "4_Lock_Close", "4_Closing"):
-            recommended_ppv = None
-
-        tip_hook = self.detect_tip_opportunity(
+            current_state=norm_input_stage,
             user_message=user_message,
-            current_phase=norm_input_stage,
-            next_phase=next_phase,
-            current_tier=current_tier,
-            total_spent_usd=total_spent_usd,
-            turn_count=turn_count,
-        )
-        if tip_hook.get("triggered"):
-            msg_l = (user_message or "").lower()
-            has_explicit_tip_intent = any(
-                kw in msg_l or kw in (user_message or "")
-                for kw in self.EXPLICIT_TIP_OR_PERSONAL_REQUEST_KEYWORDS
-            )
-            if (
-                next_phase in ("3_Lead_Pitch", "4_Lock_Close", "4_Closing")
-                and recommended_ppv is not None
-                and not has_explicit_tip_intent
-            ):
-                # 通常の好意的な会話でステージ突破したターンは、PPV提案を潰さず優先する
-                tip_hook = {
-                    "triggered": False,
-                    "suggested_amount_usd": 0.0,
-                    "reason": None,
-                    "suppressed_reason": f"ステージ突破（{next_phase}）に伴うPPV提案を優先",
-                }
-            else:
-                recommended_ppv = None
-                if next_phase in ("3_Lead_Pitch", "4_Lock_Close", "4_Closing"):
-                    next_phase = (
-                        "5_Cooldown"
-                        if norm_input_stage in ("4_Lock_Close", "4_Closing", "5_Cooldown")
-                        else "2_Explore"
-                    )
-                    adj_next_st, adj_thresh = self.get_stage_target_meta(next_phase, active_thresholds)
-                    adj_score = min(int(stage_prog["stage_score"]), max(0, int(adj_thresh) - 5))
-                    stage_prog["current_stage"] = next_phase
-                    stage_prog["next_stage"] = adj_next_st
-                    stage_prog["stage_threshold"] = adj_thresh
-                    stage_prog["stage_score"] = adj_score
-                    stage_prog["remaining_points"] = max(0, int(adj_thresh) - adj_score)
-
-        resolved_ab = str(ab_group or "").strip().upper()
-        if resolved_ab not in ("A", "B") and fan_id:
-            fan_rec = get_fan_record(char_id, fan_id, db_path=db_path)
-            if fan_rec:
-                resolved_ab = str(fan_rec.get("ab_group") or "A").strip().upper()
-        if resolved_ab not in ("A", "B"):
-            resolved_ab = "A"
-
-        active_playbook = get_active_playbook_for_group(char_id, ab_group=resolved_ab, db_path=db_path)
-        prompt_version = f"v{active_playbook.get('version_id', 1)}-{resolved_ab}"
-        recent_emojis = self.extract_recent_ai_emojis(msg_history[:-1])
-
-        # Step 6: システムプロンプト構築 ＆ 英語営業応答・日本語訳生成
-        system_prompt = self.build_sales_system_prompt(
-            char_id=char_id,
-            sales_phase=next_phase,
-            current_tier=current_tier,
-            total_spent_usd=total_spent_usd,
-            pricing_mode=pricing_mode,
-            recommended_ppv=recommended_ppv,
-            psych_profile=psych_profile,
-            persona=persona,
-            plans=plans,
-            ab_group=resolved_ab,
-            playbook=active_playbook,
-            tip_hook=tip_hook,
-            recent_used_emojis=recent_emojis,
+            ear_result=ear_result,
+            consecutive_ppv_ignored=consecutive_ppv_ignored,
+            state_step_turns=state_step_turns,
             db_path=db_path,
         )
+        next_phase = new_state
 
-        fallback_reply = self._build_fallback_sales_reply(
+        # state_step_turns を次ターン用に更新 (遷移先が同一ステートなら +1、遷移したら 0)
+        if next_phase == norm_input_stage and next_phase in (STATE_COLLECT, STATE_COOLDOWN):
+            new_step_turns = state_step_turns + 1
+        else:
+            new_step_turns = 0
+
+        # Step 6: 口役プロンプト構築 ＆ 英語営業応答・日本語訳生成
+        system_prompt = build_speaker_prompt(
             char_id=char_id,
-            sales_phase=next_phase,
-            pricing_mode=pricing_mode,
-            recommended_ppv=recommended_ppv,
-            persona=persona,
-            plans=plans,
-            current_tier=current_tier,
-            tip_hook=tip_hook,
+            state=next_phase,
+            chosen_ppv=recommended_ppv,
+            profile=psych_profile,
+            recent_messages=msg_history,
         )
 
-        convo_context_lines = [
-            f"{'Fan' if m['sender'] == 'fan' else persona.get('display_name', char_id)}: {m['content']}"
-            for m in msg_history[-6:]
-        ]
-        user_prompt = (
-            "Recent DM History:\n"
-            + "\n".join(convo_context_lines)
-            + f"\n\nLatest Fan Message: {user_message}\n"
-            "Write your next English DM reply now:"
-        )
+        # フォールバック返信 (LLM失敗時)
+        if next_phase == STATE_PITCH and recommended_ppv:
+            _price = float(recommended_ppv.get("base_price_usd") or 9.99)
+            fallback_reply = (
+                f"Got it babe... it's all yours for ${_price:.2f}. "
+                f"Say the word and I'll send it over."
+            )
+        elif next_phase == STATE_COOLDOWN:
+            fallback_reply = "Mmm, you've been so sweet lately. Let's just enjoy this for a bit."
+        else:
+            fallback_reply = "Tell me more... what do you like best?"
 
         try:
             _raw_reply = execute_with_resilient_retry(
                 lambda: self.llm.generate_text(
                     system_prompt=system_prompt,
-                    user_prompt=user_prompt,
+                    user_prompt=f"Write your next English DM reply now:\n{user_message}",
                     temperature=0.72,
                     max_tokens=240,
                     fallback_text=fallback_reply,
@@ -1767,29 +1640,6 @@ class SalesEngine:
             _raw_reply = fallback_reply
         ai_reply = LLMClient.normalize_dm_newlines(_raw_reply)
 
-        nickname = (persona.get("user_nickname_default") or "babe").split("/")[0].strip()
-        if next_phase == "5_Cooldown":
-            ai_reply = self.sanitize_cooldown_reply(ai_reply, nickname=nickname, turn_idx=turn_count)
-
-        # ★厳格検証：最終生成された英語返信文の中に本当にチップ要求文言 (tip / spoil me / treat me 等) がある場合のみチップ誘導確定
-        if tip_hook.get("triggered"):
-            if not self.verify_tip_request_in_reply(ai_reply):
-                tip_hook = {
-                    "triggered": False,
-                    "suggested_amount_usd": 0.0,
-                    "reason": None,
-                    "suppressed_reason": "最終英語返信文にチップ要求表現が含まれないため誤記録を防止",
-                }
-        else:
-            tip_hook["triggered"] = False
-
-        if not tip_hook.get("triggered") and next_phase in ("3_Lead_Pitch", "4_Lock_Close", "4_Closing") and recommended_ppv:
-            offered_price_val = float(recommended_ppv.get("offered_price_usd") or 9.99)
-            if "$" not in ai_reply:
-                em_a = self.EMOJI_PALETTE[turn_count % len(self.EMOJI_PALETTE)]
-                em_b = self.EMOJI_PALETTE[(turn_count + 3) % len(self.EMOJI_PALETTE)]
-                ai_reply = f"{ai_reply.rstrip()}\n(Special secret unlock just for you at ${offered_price_val:.2f} {em_a}{em_b})"
-
         ai_reply_ja = LLMClient.normalize_dm_newlines(self.llm.translate_to_japanese(ai_reply))
 
         if recommended_ppv:
@@ -1797,36 +1647,37 @@ class SalesEngine:
                 f"Step {recommended_ppv.get('ladder_step')} ({recommended_ppv.get('ppv_id')})"
             )
             psych_profile["dynamic_pricing"] = (
-                f"{pricing_mode.upper()} (${float(recommended_ppv.get('offered_price_usd') or 0.0):.2f})"
+                f"TAG_MATCH (${float(recommended_ppv.get('base_price_usd') or 0.0):.2f})"
             )
 
-        psych_profile["_sell_stage_state"] = {
-            "current_stage": stage_prog["current_stage"],
-            "next_stage": stage_prog["next_stage"],
-            "stage_score": stage_prog["stage_score"],
-            "stage_threshold": stage_prog["stage_threshold"],
-            "remaining_points": stage_prog["remaining_points"],
-            "earned_points": stage_prog["earned_points"],
-            "score_reason_ja": stage_prog["score_reason_ja"],
+        psych_profile["_state_step_turns"] = new_step_turns
+        psych_profile["_new_state_machine"] = {
+            "current_state": next_phase,
+            "next_transition_condition": state_meta.get("next_transition_condition"),
+            "reason_ja": state_meta.get("reason_ja"),
+            "matched_tags": state_meta.get("matched_tags"),
+            "ear_reasoning_ja": ear_result.get("reasoning_ja"),
         }
 
-        decision_log = self._build_turn_decision_log(
-            user_message=user_message,
-            sales_phase=norm_input_stage,
-            next_phase=next_phase,
-            turn_count=turn_count,
-            total_spent_usd=total_spent_usd,
-            pricing_mode=pricing_mode,
-            recommended_ppv=recommended_ppv,
-            tip_hook=tip_hook,
-            resolved_ab=resolved_ab,
-            prompt_version=prompt_version,
-            active_playbook=active_playbook,
-            psych_profile=psych_profile,
-            ai_reply_ja=ai_reply_ja,
-            stage_progression=stage_prog,
-        )
+        # 決定ログ (新フロー)
+        decision_log = {
+            "recorded_at": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+            "mode": "new_state_machine",
+            "fan_message_en": user_message,
+            "current_state": norm_input_stage,
+            "next_state": next_phase,
+            "state_reason_ja": state_meta.get("reason_ja"),
+            "next_transition_condition": state_meta.get("next_transition_condition"),
+            "matched_tags": state_meta.get("matched_tags"),
+            "has_buy_intent": ear_result.get("has_buy_intent"),
+            "unmatched_needs": ear_result.get("unmatched_needs"),
+            "recommended_ppv_id": (recommended_ppv or {}).get("ppv_id"),
+            "recommended_ppv_price": float((recommended_ppv or {}).get("base_price_usd") or 0.0),
+            "ai_reply": ai_reply,
+            "ai_reply_ja": ai_reply_ja,
+        }
 
+        # DB 永続化 ＆ PPV提案記録
         tip_tx_id: Optional[int] = None
         if persist_db and fan_id:
             updated_fan = upsert_fan_sales_state(
@@ -1837,52 +1688,53 @@ class SalesEngine:
                 sales_phase=next_phase,
                 consecutive_unanswered=0,
                 consecutive_ppv_ignored=consecutive_ppv_ignored,
-                is_low_priority=0,
+                is_low_priority=1 if next_phase == STATE_LOW_PRIORITY else 0,
                 is_escalated=0,
                 escalation_reason=None,
                 psych_profile_dict=psych_profile,
                 db_path=db_path,
             )
-            if updated_fan.get("ab_group"):
-                resolved_ab = str(updated_fan["ab_group"])
-                decision_log["strategy_reasoning"]["ab_rule_applied"]["ab_group"] = resolved_ab
-
             append_fan_decision_log(char_id, fan_id, decision_log, db_path=db_path)
 
-            if record_tip_in_db and tip_hook.get("triggered") and self.verify_tip_request_in_reply(ai_reply):
-                tip_tx_id = record_ppv_offer(
+            # PPV 提案が確定した場合、tx 記録（購入状態は未確定）
+            if recommended_ppv and recommended_ppv.get("ppv_id"):
+                record_ppv_offer(
                     char_id=char_id,
                     fan_id=fan_id,
-                    ppv_id=None,
-                    offered_price=float(tip_hook.get("suggested_amount_usd") or 5.0),
-                    tx_type="tip",
+                    ppv_id=recommended_ppv.get("ppv_id"),
+                    offered_price=float(recommended_ppv.get("base_price_usd") or 9.99),
+                    tx_type="ppv",
                     db_path=db_path,
                 )
-                tip_hook["tx_id"] = tip_tx_id
 
         return {
             "ok": True,
             "char_id": char_id,
             "fan_id": fan_id,
-            "ab_group": resolved_ab,
-            "prompt_version": prompt_version,
-            "playbook_version_id": active_playbook.get("version_id"),
             "is_escalated": 0,
             "escalation_reason": None,
-            "is_low_priority": 0,
+            "is_low_priority": 1 if next_phase == STATE_LOW_PRIORITY else 0,
             "sales_phase": next_phase,
-            "current_stage": stage_prog["current_stage"],
-            "next_stage": stage_prog["next_stage"],
-            "stage_score": stage_prog["stage_score"],
-            "stage_threshold": stage_prog["stage_threshold"],
-            "remaining_points": stage_prog["remaining_points"],
-            "earned_points": stage_prog["earned_points"],
-            "score_reason_ja": stage_prog["score_reason_ja"],
-            "stage_progression": stage_prog,
-            "pricing_tier": pricing_mode,
+            "current_stage": next_phase,
+            "next_stage": state_meta.get("next_transition_condition") or next_phase,
+            "stage_score": 0,
+            "stage_threshold": 0,
+            "remaining_points": 0,
+            "earned_points": 0,
+            "score_reason_ja": state_meta.get("reason_ja"),
+            "stage_progression": {
+                "current_stage": next_phase,
+                "next_stage": state_meta.get("next_transition_condition") or next_phase,
+                "stage_score": 0,
+                "stage_threshold": 0,
+                "remaining_points": 0,
+                "earned_points": 0,
+                "score_reason_ja": state_meta.get("reason_ja"),
+            },
+            "pricing_tier": "TAG_MATCH" if recommended_ppv else "none",
             "recommended_ppv": recommended_ppv,
-            "tip_hook": tip_hook,
-            "tip_tx_id": tip_tx_id,
+            "state_meta": state_meta,
+            "ear_result": ear_result,
             "ai_en": ai_reply,
             "ai_ja": ai_reply_ja,
             "ai_reply": ai_reply,
@@ -2037,6 +1889,197 @@ class SalesEngine:
 
 
 sales_engine = SalesEngine()
+
+
+# =====================================================================
+# [Ticket 4.5] 新ステートマシン (3ステート ＋ 救済・例外ルート)
+# ステート: 1_Collect_Tags / 2_Pitch_PPV / 3_Cooldown
+# 例外: Escalate_Stop / Low_Priority
+# =====================================================================
+STATE_COLLECT = "1_Collect_Tags"
+STATE_PITCH = "2_Pitch_PPV"
+STATE_COOLDOWN = "3_Cooldown"
+STATE_ESCALATE = "Escalate_Stop"
+STATE_LOW_PRIORITY = "Low_Priority"
+
+
+def evaluate_state_transition(
+    char_id: str,
+    fan_id: str,
+    current_state: str,
+    user_message: str,
+    ear_result: Dict[str, Any],
+    consecutive_ppv_ignored: int = 0,
+    state_step_turns: int = 0,
+    tag_collect_target_count: int = 1,
+    tag_collect_max_turns: int = 5,
+    cooldown_turns_threshold: int = 3,
+    db_path: Optional[str] = None,
+) -> Tuple[str, Optional[Dict[str, Any]], Dict[str, Any]]:
+    """
+    決定論的ステート遷移判定。
+    戻り値: (new_state, chosen_ppv_or_None, meta)
+      meta: {"matched_tags", "reason_ja", "next_transition_condition", ...}
+    """
+    from app.services.tag_matcher import match_ppv_deterministic
+    from app.core import config as _cfg
+
+    matched_tags: List[str] = [str(t).strip().lstrip("#") for t in (ear_result.get("matched_tags") or []) if str(t).strip()]
+    has_buy_intent = bool(ear_result.get("has_buy_intent"))
+    meta: Dict[str, Any] = {"matched_tags": matched_tags, "reason_ja": "", "next_transition_condition": ""}
+
+    # --- 危険ワード検知: 即座に Escalate_Stop ---
+    msg_lower = (user_message or "").lower()
+    for kw in _cfg.DANGER_KEYWORDS:
+        kw_clean = str(kw).strip().lower()
+        if not kw_clean:
+            continue
+        hit = (kw_clean in msg_lower) or (kw_clean in ("bot", "ai") and bool(re.search(rf"\b{re.escape(kw_clean)}\b", msg_lower)))
+        if hit:
+            meta["reason_ja"] = f"危険ワード検知 ('{kw_clean}') により自動返信停止"
+            meta["next_transition_condition"] = "人間の介入・確認待ち"
+            return STATE_ESCALATE, None, meta
+
+    # --- 無料フォロワーかつ2回連続PPV無視: Low_Priority ---
+    fan_rec = None
+    if fan_id:
+        try:
+            fan_rec = get_fan_record(char_id, fan_id, db_path=db_path)
+        except Exception:
+            fan_rec = None
+    is_free = True
+    if fan_rec:
+        tier = str(fan_rec.get("current_tier") or "free_follower").strip().lower()
+        spent = float(fan_rec.get("total_spent_usd") or 0.0)
+        is_free = tier == "free_follower" and spent <= 0.0
+    if is_free and int(consecutive_ppv_ignored or 0) >= 2:
+        meta["reason_ja"] = f"無料フォロワーでPPVを{consecutive_ppv_ignored}回連続スルー → 省エネモード"
+        meta["next_transition_condition"] = "相槌のみ・フル推論を抑制"
+        return STATE_LOW_PRIORITY, None, meta
+
+    turns = max(0, int(state_step_turns or 0))
+
+    # --- 1_Collect_Tags ---
+    if current_state in (STATE_COLLECT, "", "1_Icebreak", "2_Explore"):
+        if has_buy_intent:
+            # [例外① 即買い飛び級] 在庫があれば即 2_Pitch_PPV
+            ppv = match_ppv_deterministic(char_id, fan_id, matched_tags, ladder_step=1, is_rescue=False, db_path=db_path)
+            if ppv is None and matched_tags:
+                ppv = match_ppv_deterministic(char_id, fan_id, matched_tags, ladder_step=1, is_rescue=True, db_path=db_path)
+            if ppv:
+                meta["reason_ja"] = "即買い飛び級: 購入意向あり＆在庫一致 → 2_Pitch_PPV へ即時遷移"
+                meta["next_transition_condition"] = "PPV提案送信成功後に 3_Cooldown"
+                return STATE_PITCH, ppv, meta
+
+        # [救済① 天井到達] 往復数 >= tag_collect_max_turns → 汎用PPVで強制遷移
+        if turns >= int(tag_collect_max_turns or 5):
+            ppv = match_ppv_deterministic(char_id, fan_id, matched_tags, ladder_step=1, is_rescue=True, db_path=db_path)
+            if ppv:
+                meta["reason_ja"] = f"天井到達 ({turns}往復 >= {tag_collect_max_turns}) → 汎用PPVで 2_Pitch_PPV へ強制遷移"
+                meta["next_transition_condition"] = "PPV提案送信成功後に 3_Cooldown"
+                return STATE_PITCH, ppv, meta
+
+        # [通常ルート] 有効タグが目標数揃い ＆ 一致する未購入PPV在庫あり → 2_Pitch_PPV
+        if len(matched_tags) >= int(tag_collect_target_count or 1):
+            ppv = match_ppv_deterministic(char_id, fan_id, matched_tags, ladder_step=1, is_rescue=False, db_path=db_path)
+            if ppv:
+                meta["reason_ja"] = f"タグ {len(matched_tags)} 個で対象PPV在庫一致 → 2_Pitch_PPV へ遷移"
+                meta["next_transition_condition"] = "PPV提案送信成功後に 3_Cooldown"
+                return STATE_PITCH, ppv, meta
+
+        # 該当PPVが無い → 1_Collect_Tags 維持 (NEED受け流し)
+        meta["reason_ja"] = "在庫一致PPVなし → 1_Collect_Tags 維持、別タグを聞き出す"
+        remaining_tags = max(0, int(tag_collect_target_count or 1) - len(matched_tags))
+        remaining_turns = max(0, int(tag_collect_max_turns or 5) - turns)
+        meta["next_transition_condition"] = (
+            f"あと {remaining_tags} 個のタグ または 天井まであと {remaining_turns} 往復"
+        )
+        return STATE_COLLECT, None, meta
+
+    # --- 2_Pitch_PPV ---
+    if current_state == STATE_PITCH:
+        # PPV提案メッセージ送信成功後は呼び出し側が即 3_Cooldown へ更新する。
+        # ここでは提案済み状態を維持（送信イベントを meta に付与）。
+        meta["reason_ja"] = "2_Pitch_PPV 滞在: 提案済み、ファンの反応待ち"
+        meta["next_transition_condition"] = "PPV提案送信成功 ➔ 3_Cooldown (state_step_turns=0)"
+        return STATE_PITCH, None, meta
+
+    # --- 3_Cooldown ---
+    if current_state == STATE_COOLDOWN:
+        if turns >= int(cooldown_turns_threshold or 3):
+            meta["reason_ja"] = f"クールダウン {turns} 往復経過 (>= {cooldown_turns_threshold}) → 1_Collect_Tags へ復帰"
+            meta["next_transition_condition"] = "タグヒアリング再開"
+            return STATE_COLLECT, None, meta
+        remaining = max(0, int(cooldown_turns_threshold or 3) - turns)
+        meta["reason_ja"] = "3_Cooldown 滞在: 余韻・冷却中"
+        meta["next_transition_condition"] = f"クールダウン完了まで あと {remaining} 往復"
+        return STATE_COOLDOWN, None, meta
+
+    # 未知ステートはヒアリングへ正規化
+    meta["reason_ja"] = f"不明ステート '{current_state}' を 1_Collect_Tags へ正規化"
+    meta["next_transition_condition"] = "タグヒアリング再開"
+    return STATE_COLLECT, None, meta
+
+
+def build_speaker_prompt(
+    char_id: str,
+    state: str,
+    chosen_ppv: Optional[Dict[str, Any]],
+    profile: Dict[str, Any],
+    recent_messages: List[Dict[str, Any]],
+) -> str:
+    """
+    口役LLMプロンプト構築: 直近8〜10往復の生履歴 ＋ facts ＋ conversation_summary ＋
+    確定したPPV販売指示（またはヒアリング指示）のみを渡し、キャラ口調で英語返信を生成させる。
+    """
+    from app.services.profiler_service import format_memory_for_reply_prompt
+    from app.services.character_loader import load_dm_persona
+
+    persona = load_dm_persona(char_id)
+    tone = persona.get("tone_and_style") or "Alluring, playful, affectionate."
+    first_person = persona.get("first_person") or "I"
+    nickname = (persona.get("user_nickname_default") or "babe").split("/")[0].strip()
+
+    memory_block = format_memory_for_reply_prompt(profile) if profile else "(no memory yet)"
+
+    hist_lines = []
+    for m in (recent_messages or [])[-10:]:
+        sender = m.get("sender")
+        role = "FAN" if sender in ("fan", "customer", "user") else "YOU"
+        content = str(m.get("content") or "").strip()
+        if content:
+            hist_lines.append(f"{role}: {content}")
+    hist_block = "\n".join(hist_lines) if hist_lines else "(no history)"
+
+    if state == STATE_PITCH and chosen_ppv:
+        price = chosen_ppv.get("base_price_usd") or 9.99
+        hint = chosen_ppv.get("pitch_hint") or "It's your exclusive secret clip."
+        instruction = (
+            f"SALES DIRECTIVE: Pitch the confirmed PPV now. Price ${price}. "
+            f"Hook: {hint}. Confidently present it at the exact price, make it irresistible, do NOT over-promise."
+        )
+    elif state == STATE_COLLECT:
+        instruction = (
+            "DISCOVERY DIRECTIVE: Playfully chat and naturally ask about ONE new favorite "
+            "(vibe / outfit / scenario) you haven't uncovered yet. Do NOT quote any price or push a PPV yet."
+        )
+    elif state == STATE_COOLDOWN:
+        instruction = (
+            "COOLDOWN DIRECTIVE: Keep the afterglow. Be affectionate and light, no selling, no price talk."
+        )
+    elif state == STATE_LOW_PRIORITY:
+        instruction = "LOW PRIORITY: Reply with one short, casual one-liner (energy saver). No pitch."
+    else:
+        instruction = "Respond naturally and warmly in character."
+
+    return (
+        f"You are {persona.get('display_name') or char_id}. "
+        f"Voice/tone: {tone}. First person: {first_person}. Call the fan '{nickname}'.\n"
+        f"{instruction}\n\n"
+        f"{memory_block}\n\n"
+        f"Recent conversation:\n{hist_block}\n\n"
+        "Write your reply in ENGLISH, 1-3 sentences, fully in character. No markdown."
+    )
 
 
 

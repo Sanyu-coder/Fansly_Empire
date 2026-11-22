@@ -287,6 +287,9 @@ def _normalize_vault_item(char_id: str, item: Dict[str, Any], index_num: int) ->
         "whale_price_usd": round(float(item.get("whale_price_usd", 19.99)), 2),
         "tags": tags,
         "tags_json": json.dumps(tags, ensure_ascii=False),
+        # [Ticket 4.2] カテゴリ別タグ (play/body_outfit/situation) と汎用おすすめフラグ
+        "is_general": int(item.get("is_general") or 0),
+        "category_tags_json": str(item.get("category_tags_json") or "{}"),
         "description_memo": desc_memo,
         "pitch_note": pitch_note,
         "pitch_hint": str(item.get("pitch_hint") or ""),
@@ -607,6 +610,11 @@ def load_vault_items(char_id: str) -> List[Dict[str, Any]]:
             if not norm_it.get("tags") and db_rec.get("tags"):
                 norm_it["tags"] = db_rec["tags"]
                 norm_it["tags_json"] = json.dumps(db_rec["tags"], ensure_ascii=False)
+            # [Ticket 4.2] DB に is_general / category_tags_json が存在する場合は反映
+            if db_rec.get("is_general") is not None:
+                norm_it["is_general"] = int(db_rec.get("is_general") or 0)
+            if db_rec.get("category_tags_json"):
+                norm_it["category_tags_json"] = str(db_rec["category_tags_json"])
         normalized.append(norm_it)
 
     if normalized:

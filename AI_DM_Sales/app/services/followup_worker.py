@@ -396,6 +396,10 @@ class FollowupWorker:
         is_unlocked == 1 となった Step 1 購入から30分〜数時間経過した熱量の高い顧客に対し、
         未購入・未提案の Step 2 動画/画像を自動提案し、ppv_transactions に記録＆送信キューへ投入する。
         """
+        # [Ticket 4.1] Step 2自動追撃は新ステートマシンとの二重送信防止のため安全に無効化（早期リターン）
+        # 未開封PPVのFOMOリマインド (process_unopened_ppv_reminders) は影響なしで正常動作を維持する。
+        logger.info("[Ticket 4.1] Step 2 followup is disabled by refactor; skipping cycle.")
+        return []
         ref_now = now_dt or datetime.now()
         unlocked_rows = get_unlocked_ppv_transactions(char_id=char_id, db_path=db_path)
         vault_cache: Dict[str, List[Dict[str, Any]]] = {}

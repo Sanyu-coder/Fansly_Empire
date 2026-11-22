@@ -1997,6 +1997,9 @@ def upsert_ppv_vault_record(
     pitch_hint = str(item.get("pitch_hint") or "").strip()
     is_active = 1 if bool(item.get("is_active", True)) else 0
     created_at = str(item.get("created_at") or now_str)
+    # [Ticket 4.6] 汎用フラグ ＋ カテゴリ別タグ
+    is_general = 1 if int(item.get("is_general") or 0) == 1 else 0
+    category_tags_json = str(item.get("category_tags_json") or "{}")
 
     conn = get_db_connection(db_path)
     try:
@@ -2006,8 +2009,9 @@ def upsert_ppv_vault_record(
                 ppv_id, char_id, filename, media_type, ladder_step,
                 base_price_usd, tripwire_price_usd, whale_price_usd,
                 tags_json, description_memo, pitch_note, pitch_hint,
+                is_general, category_tags_json,
                 is_active, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(char_id, ppv_id) DO UPDATE SET
                 filename = excluded.filename,
                 media_type = excluded.media_type,
@@ -2019,6 +2023,8 @@ def upsert_ppv_vault_record(
                 description_memo = excluded.description_memo,
                 pitch_note = excluded.pitch_note,
                 pitch_hint = excluded.pitch_hint,
+                is_general = excluded.is_general,
+                category_tags_json = excluded.category_tags_json,
                 is_active = excluded.is_active,
                 updated_at = excluded.updated_at;
             """,
@@ -2026,6 +2032,7 @@ def upsert_ppv_vault_record(
                 ppv_id, char_id, filename, media_type, ladder_step,
                 base_price, tripwire_price, whale_price,
                 tags_json_str, desc_memo, pitch_note, pitch_hint,
+                is_general, category_tags_json,
                 is_active, created_at, now_str,
             ),
         )

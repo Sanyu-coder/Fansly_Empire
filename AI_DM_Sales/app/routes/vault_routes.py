@@ -424,13 +424,45 @@ def api_vault_upload():
     whale_price = _to_float(data.get("whale_price_usd"), step_defaults["whale_price_usd"])
 
     tags = _parse_tags(data.get("tags"))
+    # [Ticket 4.6] Vision自動解析を廃止。タグは手入力のみ（master_tags からの選択）。
+    # category_tags_json（play / body_outfit / situation のカテゴリ別タグ）を受け取る。
+    category_tags_raw = data.get("category_tags") or {}
+    if isinstance(category_tags_raw, str):
+        try:
+            category_tags_raw = json.loads(category_tags_raw)
+        except Exception:
+            category_tags_raw = {}
+    if not isinstance(category_tags_raw, dict):
+        category_tags_raw = {}
+    # 各カテゴリのタグを master_tags の有効IDでフィルタして正規化
+    from app.services.tag_matcher import load_master_tags
+    _valid_ids = set()
+    for _cat in load_master_tags().get("categories", {}).values():
+        for _t in _cat.get("tags", []):
+            if _t.get("id"):
+                _valid_ids.add(str(_t["id"]).strip())
+
+    def _norm_cat_tags(v):
+        if isinstance(v, list):
+            return [str(t).strip().lstrip("#") for t in v if str(t).strip() and str(t).strip().lstrip("#") in _valid_ids]
+        if isinstance(v, str) and v.strip():
+            t = v.strip().lstrip("#")
+            return [t] if t in _valid_ids else []
+        return []
+
+    category_tags = {
+        "play": _norm_cat_tags(category_tags_raw.get("play")),
+        "body_outfit": _norm_cat_tags(category_tags_raw.get("body_outfit") or category_tags_raw.get("outfit")),
+        "situation": _norm_cat_tags(category_tags_raw.get("situation")),
+    }
+    is_general = 1 if str(data.get("is_general") or "").lower() in ("1", "true", "yes") else 0
+
     description_memo = str(
         data.get("description_memo")
         if data.get("description_memo") is not None
         else (data.get("pitch_note") or "")
     ).strip()
     pitch_hint = str(data.get("pitch_hint") or "").strip()
-    force_vision = str(data.get("auto_vision") or "").lower() in ("1", "true", "yes")
 
     used_vision = False
     vision_model_used = None
@@ -447,43 +479,9 @@ def api_vault_upload():
                 media_path=dest_path,
                 media_type=media_type,
             )
-            thumb_tmp_path = assets.get("thumbnail_path")
             blur_preview_path = assets.get("blur_preview_path")
             blur_preview_filename = str(assets.get("blur_preview_filename") or "")
             blur_preview_exists = bool(assets.get("blur_preview_exists"))
-
-        need_vision_tags = force_vision or _needs_vision_enrichment(tags, description_memo)
-        if need_vision_tags or not pitch_hint:
-            persona = load_dm_persona(char_id)
-            if has_real_file:
-                draft = llm_client.analyze_ppv_media_with_vision(
-                    char_id=char_id,
-                    persona=persona,
-                    media_path=dest_path,
-                    filename=original_filename,
-                    media_type=media_type,
-                    ladder_step=ladder_step,
-                    auto_pull_model=True,
-                    thumbnail_image_path=thumb_tmp_path,
-                )
-                used_vision = bool(draft.get("used_vision"))
-                vision_model_used = draft.get("vision_model")
-                extracted_thumbnail_used = bool(draft.get("extracted_thumbnail_used"))
-            else:
-                draft = llm_client.generate_ppv_draft(
-                    char_id=char_id,
-                    persona=persona,
-                    filename=original_filename,
-                    media_type=media_type,
-                    ladder_step=ladder_step,
-                )
-            tags = draft["tags"] if (force_vision or _needs_vision_enrichment(tags, description_memo) or not tags) else tags
-            description_memo = (
-                draft.get("description_memo") or ""
-                if (force_vision or not description_memo or not re.search(r"[\u3040-\u30ff\u4e00-\u9faf]", description_memo))
-                else description_memo
-            )
-            pitch_hint = draft["pitch_hint"] if (force_vision or not pitch_hint) else pitch_hint
     finally:
         if thumb_tmp_path and os.path.exists(thumb_tmp_path):
             try:
@@ -502,6 +500,10 @@ def api_vault_upload():
         "whale_price_usd": whale_price,
         "tags": tags,
         "tags_json": json.dumps(tags, ensure_ascii=False),
+        # [Ticket 4.6] カテゴリ別タグ ＋ 汎用おすすめフラグ
+        "category_tags": category_tags,
+        "category_tags_json": json.dumps(category_tags, ensure_ascii=False),
+        "is_general": is_general,
         "description_memo": description_memo,
         "pitch_note": description_memo,
         "pitch_hint": pitch_hint,

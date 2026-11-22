@@ -71,7 +71,8 @@ if __name__ == "__main__":
     bot_manager.start_monitoring_all()
     bot_manager.start_watchdog()
     followup_worker.start()
-    dormant_revival_worker.start()
+    # [Ticket 4.1] 休眠ファン掘り起こしバッチは安全に無効化（起動しない）
+    # dormant_revival_worker.start()
 
     print("==================================================")
     print("👑 Fansly AI DM Sales Engine (AI_DM_Sales v1.4) 起動！")

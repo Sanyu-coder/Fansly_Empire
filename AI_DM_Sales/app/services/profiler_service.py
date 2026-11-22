@@ -3,8 +3,13 @@ import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Union
 
-from app.core.database import get_fan_record, save_fan_psych_profile_db
+from app.core.database import (
+    get_fan_record,
+    save_fan_psych_profile_db,
+    record_unmatched_need,
+)
 from app.core.llm_client import llm_client, execute_with_resilient_retry, LLMResilientRetryExhaustedError
+from app.services.tag_matcher import get_active_ppv_tags, get_all_master_tag_ids
 
 
 def _parse_existing_profile(existing_profile_json: Union[str, Dict[str, Any], None]) -> Dict[str, Any]:
@@ -422,5 +427,221 @@ def format_psych_profile_for_prompt(profile_data: Union[str, Dict[str, Any], Non
     ]
     if notes:
         lines.append(f"- Sales Notes: {notes}")
+    return "\n".join(lines)
+
+
+# =====================================================================
+# [Ticket 4.3] 耳役LLM: タグ分類・購入意向判定・NEED抽出
+# =====================================================================
+def classify_fan_intent_and_tags(
+    char_id: str,
+    recent_messages: List[Dict[str, str]],
+    existing_matched_tags: Optional[List[str]] = None,
+    db_path: Optional[str] = None,
+    persist_needs: bool = True,
+    fan_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    耳役LLMでファンの直近発言から以下を抽出する:
+      - matched_tags     : 定義済みマスタータグIDのみ（厳密一致）
+      - has_buy_intent   : 明確な購入・コンテンツ要求があれば True
+      - unmatched_needs  : マスタータグに無いフェチ/衣装/シチュエーション要望 (英語キーワード)
+      - reasoning_ja     : 判定根拠（日本語）
+    """
+    candidates = get_active_ppv_tags(char_id, db_path=db_path)
+    if not candidates:
+        candidates = []
+        # フォールバック: 全マスタータグを提示
+        from app.services.tag_matcher import load_master_tags
+        for cat in (load_master_tags().get("categories") or {}).values():
+            for tag in (cat.get("tags") or []):
+                candidates.append(
+                    {
+                        "id": tag.get("id"),
+                        "category": tag.get("category"),
+                        "name_ja": tag.get("name_ja"),
+                        "llm_hint": tag.get("llm_hint"),
+                    }
+                )
+
+    tag_lines = [
+        f"- {c['id']} ({c.get('name_ja') or c['id']}): {c.get('llm_hint') or ''}"
+        for c in candidates
+    ]
+    tag_block = "\n".join(tag_lines) if tag_lines else "(no active PPV tags)"
+
+    msgs = _normalize_recent_messages(recent_messages)
+    fan_msgs = [
+        str(m.get("content") or "")
+        for m in msgs
+        if m.get("sender") in ("fan", "customer", "user") and str(m.get("content") or "").strip()
+    ]
+    fan_msgs = fan_msgs[-10:]
+    fan_block = "\n".join(fan_msgs) if fan_msgs else "(no recent fan messages)"
+    existing_tags = [str(t).strip() for t in (existing_matched_tags or []) if str(t).strip()]
+
+    system_prompt = (
+        "You are the 'Ear' analyst in a Fansly DM sales pipeline. "
+        "Analyze the fan's recent messages and classify them strictly. "
+        "Return ONLY valid JSON, no markdown, no extra text.\n"
+        "Rules:\n"
+        "1. matched_tags: ONLY ids from the candidate tag list below that the fan clearly wants. "
+        "Never invent ids. Empty array if none.\n"
+        "2. has_buy_intent: true ONLY if the fan explicitly asks to see/buy/unlock content "
+        "(e.g. 'show me', 'how much', 'want to buy', 'send it').\n"
+        "3. unmatched_needs: English keywords for fetishes/outfits/situations the fan wants that are "
+        "NOT in the candidate tag list.\n"
+        "4. reasoning_ja: one short Japanese sentence explaining the decision.\n"
+        "Output JSON schema:\n"
+        '{"matched_tags": ["lingerie"], "has_buy_intent": true, "unmatched_needs": ["glasses"], "reasoning_ja": "..."}'
+    )
+    user_prompt = (
+        f"Candidate master tags (id (ja_name): llm_hint):\n{tag_block}\n\n"
+        f"Existing confirmed tags: {', '.join(existing_tags) if existing_tags else '(none)'}\n\n"
+        f"Fan's recent messages:\n{fan_block}\n\n"
+        "Classify now and return the JSON."
+    )
+
+    default_data: Dict[str, Any] = {
+        "matched_tags": [],
+        "has_buy_intent": False,
+        "unmatched_needs": [],
+        "reasoning_ja": "",
+    }
+    try:
+        extracted = execute_with_resilient_retry(
+            lambda: llm_client.generate_json(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                default_data=default_data,
+                temperature=0.2,
+            ),
+            task_name="ear_llm_classify",
+        )
+    except LLMResilientRetryExhaustedError:
+        extracted = dict(default_data)
+
+    valid_ids = {c["id"] for c in candidates if c.get("id")}
+    matched = [
+        str(t).strip().lstrip("#")
+        for t in (extracted.get("matched_tags") or [])
+        if str(t).strip().lstrip("#") in valid_ids
+    ]
+    # 厳密一致で重複除去（順序維持）
+    matched: List[str] = list(dict.fromkeys(matched))
+    has_buy_intent = bool(extracted.get("has_buy_intent"))
+    unmatched_needs = _normalize_str_list(extracted.get("unmatched_needs") or [], max_items=8)
+    reasoning_ja = str(extracted.get("reasoning_ja") or "").strip()
+
+    # [Ticket 4.3] 未登録 NEED は DB に即時蓄積
+    if persist_needs and unmatched_needs and fan_id:
+        for kw in unmatched_needs:
+            try:
+                record_unmatched_need(
+                    char_id=char_id,
+                    fan_id=fan_id,
+                    keyword=str(kw).strip().lower(),
+                    raw_quote=fan_block.split("\n")[-1] if fan_block else "",
+                    db_path=db_path,
+                )
+            except Exception:
+                pass
+
+    return {
+        "matched_tags": matched,
+        "has_buy_intent": has_buy_intent,
+        "unmatched_needs": unmatched_needs,
+        "reasoning_ja": reasoning_ja,
+    }
+
+
+# =====================================================================
+# [Ticket 4.4] 構造化長期記憶 (facts / conversation_summary) 更新
+# =====================================================================
+def update_fan_facts_and_summary(
+    char_id: str,
+    fan_id: str,
+    recent_messages: List[Dict[str, str]],
+    existing_profile: Optional[Dict[str, Any]] = None,
+    db_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    直近会話から事実箇条書き(facts, 最大8件) と会話あらすじ(conversation_summary, 3〜4行)を
+    抽出し、既存カルテと統合する。優先度LOW（空き時間実行・間引き）を想定。
+    """
+    existing = dict(existing_profile or {})
+    prev_facts = _normalize_str_list(existing.get("facts"), max_items=8)
+    prev_summary = str(existing.get("conversation_summary") or "").strip()
+    prev_tags = _normalize_str_list(existing.get("matched_tags"), max_items=16)
+
+    msgs = _normalize_recent_messages(recent_messages)
+    transcript = "\n".join(
+        f"{'FAN' if m.get('sender') in ('fan', 'customer', 'user') else 'AI'}: {str(m.get('content') or '').strip()}"
+        for m in msgs[-16:]
+        if str(m.get("content") or "").strip()
+    )
+
+    system_prompt = (
+        "You maintain a long-term memory card for a Fansly fan. "
+        "From the conversation transcript, extract (in Japanese):\n"
+        "1. facts: bullet-point concrete facts, NG constraints, and promises the character made. "
+        "Keep at most 8 items. Merge duplicates, drop stale/contradictory info.\n"
+        "2. conversation_summary: a 3-4 line Japanese synopsis of the whole conversation so far.\n"
+        "Return ONLY valid JSON: {\"facts\": [...], \"conversation_summary\": \"...\"}"
+    )
+    user_prompt = (
+        f"Existing facts:\n"
+        f"{chr(10).join('- ' + f for f in prev_facts) if prev_facts else '(none)'}\n"
+        f"Existing summary: {prev_summary or '(none)'}\n\n"
+        f"Recent transcript:\n{transcript}\n\n"
+        "Update the facts and summary and return the JSON."
+    )
+
+    default_data: Dict[str, Any] = {"facts": prev_facts, "conversation_summary": prev_summary}
+    try:
+        extracted = execute_with_resilient_retry(
+            lambda: llm_client.generate_json(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                default_data=default_data,
+                temperature=0.3,
+            ),
+            task_name="memory_facts_summary",
+        )
+    except LLMResilientRetryExhaustedError:
+        extracted = dict(default_data)
+
+    facts = _normalize_str_list(extracted.get("facts"), max_items=8)
+    if not facts:
+        facts = prev_facts
+    summary = str(extracted.get("conversation_summary") or prev_summary).strip()
+
+    now_iso = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+    profile: Dict[str, Any] = {
+        "matched_tags": prev_tags,
+        "facts": facts,
+        "conversation_summary": summary,
+        "updated_at": now_iso,
+    }
+    return profile
+
+
+def format_memory_for_reply_prompt(profile: Dict[str, Any]) -> str:
+    """
+    口役LLMプロンプトに注入する構造化記憶テキストを構築する。
+    [ファンに関する確定記憶(Facts)] と [これまでの会話あらすじ] を返す。
+    """
+    prof = dict(profile or {})
+    facts = _normalize_str_list(prof.get("facts"), max_items=8)
+    summary = str(prof.get("conversation_summary") or "").strip()
+
+    lines = ["[Long-Term Fan Memory (for the speaker)]"]
+    lines.append("[Confirmed Facts / Promises]")
+    if facts:
+        lines.extend(f"- {f}" for f in facts)
+    else:
+        lines.append("- (no confirmed facts yet)")
+    lines.append("[Conversation Synopsis]")
+    lines.append(summary if summary else "- (no synopsis yet)")
     return "\n".join(lines)
 
