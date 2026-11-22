@@ -286,7 +286,7 @@ flowchart TD
 
 ### Phase 3: 通信・死活監視・排他制御・連投デバウンス
 
-#### Ticket 3.1: 送信中排他ロック (`is_sending`) の実装
+#### Ticket 3.1: 送信中排他ロック (`is_sending`) の実装 `[x] 完了`
 - **対象ファイル**: `C:\Fansly_Empire\AI_DM_Sales\app\services\fansly_dm_bot.py`（※局所編集ルール厳守: `CharacterBotWorker.__init__`, `_send_via_playwright_page`, `force_restart` 付近のみを編集）
 - **具体的な実装内容**:
   1. `CharacterBotWorker` クラスに排他フラグと同期プリミティブを追加:
@@ -302,7 +302,7 @@ flowchart TD
 
 ---
 
-#### Ticket 3.2: ゾンビ化検知と3段階自動リカバリの実装
+#### Ticket 3.2: ゾンビ化検知と3段階自動リカバリの実装 `[x] 完了`
 - **対象ファイル**: `C:\Fansly_Empire\AI_DM_Sales\app\services\fansly_dm_bot.py`（※局所編集ルール厳守: `CharacterBotWorker` の巡回・ハートビートおよび `BotManager.check_and_recover_workers_once()` 付近のみを編集）
 - **具体的な実装内容**:
   1. `CharacterBotWorker` の状態記録変数を追加:
@@ -321,7 +321,7 @@ flowchart TD
 
 ---
 
-#### Ticket 3.3: 受信連投デバウンス（まとめ受信）機構の実装
+#### Ticket 3.3: 受信連投デバウンス（まとめ受信）機構の実装 `[x] 完了`
 - **対象ファイル**: `C:\Fansly_Empire\AI_DM_Sales\app\services\fansly_dm_bot.py`（※局所編集ルール厳守: `_poll_fansly_page_once` 付近のみを編集）
 - **具体的な実装内容**:
   1. `CharacterBotWorker` にデバウンスバッファを新設:
@@ -340,7 +340,7 @@ flowchart TD
 
 ---
 
-#### Ticket 3.4: 手動介入送信（`human_manual`）時のステート同期
+#### Ticket 3.4: 手動介入送信（`human_manual`）時のステート同期 `[x] 完了`
 - **対象ファイル**: `C:\Fansly_Empire\AI_DM_Sales\app\services\fansly_dm_bot.py`（※局所編集ルール厳守: `_drain_outbox_queue` 付近のみを編集）
 - **具体的な実装内容**:
   1. 人間が管理画面から手動送信（`source == "human_manual"`）した際のステートマシン同期処理を強化する:

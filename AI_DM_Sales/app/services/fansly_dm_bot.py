@@ -27,6 +27,7 @@ from app.core.database import (
     set_fan_manual_hold,
     upsert_fan_sales_state,
 )
+from app.core.discord_notifier import send_discord_alert
 from app.core.llm_client import LLMClient, llm_client
 from app.services.character_loader import (
     ensure_character_files,
@@ -522,6 +523,15 @@ class CharacterBotWorker:
 
         self._lock = threading.RLock()
         self._page_lock = threading.RLock()
+        # [Ticket 3.1] 送信中排他ロック (DOM操作の二重実行・再起動時の中断防止)
+        self.is_sending: bool = False
+        self._sending_lock = threading.Lock()
+        # [Ticket 3.2] ゾンビ検知用状態記録
+        self.last_successful_dom_poll_ts: float = time.time()
+        self.recovery_stage: int = 0  # 0: 正常, 1: リロード済み, 2: 再起動済み
+        self._zombie_recovery_checked_ts: float = 0.0
+        # [Ticket 3.3] 受信連投デバウンスバッファ: fan_id -> バッファ情報
+        self._incoming_debounce_buffer: Dict[str, Dict[str, Any]] = {}
         self._stop_event = threading.Event()
         self._wake_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
@@ -583,6 +593,16 @@ class CharacterBotWorker:
         if self.manual_login_active:
             logger.info(f"[{self.char_id}] Skipping force_restart during manual_login_active (reason={reason})")
             return False
+
+        # [Ticket 3.1] 送信中 (is_sending == True) の場合は最大30秒間、送信完了を待ってから再起動する
+        # (DOM操作の途中でブラウザを破棄すると二重送信・DOM破損の原因となる)
+        if self.is_sending:
+            logger.warning(f"[{self.char_id}] force_restart waiting for in-progress send (reason={reason})...")
+            wait_start = time.time()
+            while self.is_sending and (time.time() - wait_start) < 30.0:
+                time.sleep(0.5)
+            if self.is_sending:
+                logger.error(f"[{self.char_id}] force_restart: send still in progress after 30s; proceeding with restart anyway")
 
         logger.warning(f"[{self.char_id}] Watchdog triggering worker restart: reason={reason}")
         with self._lock:
@@ -2505,6 +2525,10 @@ class CharacterBotWorker:
                     self.last_error = msg
                     return False
 
+            # [Ticket 3.1] 実際の送信操作 (添付/入力/送信ボタン押下) を開始する直前に排他フラグを設定
+            with self._sending_lock:
+                self.is_sending = True
+
             attached_ppv_ok = False
             if selected_ppv and isinstance(selected_ppv, dict):
                 filename = str(selected_ppv.get("filename") or "").strip()
@@ -2625,6 +2649,9 @@ class CharacterBotWorker:
             self.last_error = err_msg
             self._cleanup_lingering_modals(page, clear_composer_attachments=bool(selected_ppv))
             return False
+        finally:
+            # [Ticket 3.1] 完了・例外のいずれの場合にも確実に排他フラグを解除する
+            self.is_sending = False
 
     def _drain_outbox_queue(self, page: Any = None, now_dt: Optional[datetime] = None) -> int:
         """
@@ -2765,6 +2792,35 @@ class CharacterBotWorker:
                     )
                 if sent_ok:
                     drained += 1
+                    # [Ticket 3.4] 手動介入送信 (human_manual) 成功時のステートマシン同期
+                    if source == "human_manual":
+                        try:
+                            # 保留中だったAI返信カウントダウンをすべてキャンセル
+                            self.cancel_pending_reply(fan_id)
+                            # ファンのステートを機械的に 3_Cooldown へ更新
+                            upsert_fan_sales_state(
+                                char_id=self.char_id,
+                                fan_id=fan_id,
+                                sales_phase="3_Cooldown",
+                            )
+                            # 手動送信でPPV素材が添付されていた場合、オファー記録を反映し二重提案リストから除外
+                            if ppv_item:
+                                record_ppv_offer(
+                                    char_id=self.char_id,
+                                    fan_id=fan_id,
+                                    ppv_id=str(ppv_item.get("ppv_id") or ppv_item.get("filename") or "").strip() or None,
+                                    offered_price=float(
+                                        ppv_item.get("offered_price_usd") or ppv_item.get("base_price_usd") or 0.0
+                                    ),
+                                )
+                            logger.info(
+                                f"[{self.char_id}] human_manual send for @{fan_id}: cancelled pending AI reply, "
+                                f"state -> 3_Cooldown"
+                            )
+                        except Exception as sync_err:
+                            logger.warning(
+                                f"[{self.char_id}] human_manual state sync failed for @{fan_id}: {sync_err}"
+                            )
                 elif effective_page is not None:
                     err_low = str(self.last_error or "").lower()
                     next_retry = retries_so_far + 1
@@ -2814,6 +2870,103 @@ class CharacterBotWorker:
         except Exception:
             if hasattr(page, "wait_for_timeout"):
                 page.wait_for_timeout(1500)
+
+    def _get_debounce_seconds(self) -> float:
+        """[Ticket 3.3] system_settings の debounce_seconds を取得 (デフォルト18秒)"""
+        try:
+            from app.core.database import get_system_settings
+            raw = get_system_settings().get("debounce_seconds")
+            return max(1.0, float(raw or 18.0))
+        except Exception:
+            return 18.0
+
+    def _enqueue_debounced_fan_message(
+        self,
+        fan_id: str,
+        username: str,
+        fan_message_en: str,
+        raw_tier_badge: Any,
+        detected_ppv_unlocked: bool,
+        page: Any,
+        now_dt: Optional[datetime],
+    ) -> None:
+        """[Ticket 3.3] 新着受信メッセージをデバウンスバッファに追加し、タイマーをリセットする"""
+        now_ts = time.time()
+        with self._lock:
+            buf = self._incoming_debounce_buffer.get(fan_id)
+            if buf is None:
+                buf = {
+                    "messages": [],
+                    "first_received_at": now_ts,
+                    "last_received_at": now_ts,
+                    "username": username,
+                    "raw_tier": raw_tier_badge,
+                    "ppv_unlocked": bool(detected_ppv_unlocked),
+                    "page": page,
+                    "now_dt": now_dt,
+                    "timer": None,
+                }
+                self._incoming_debounce_buffer[fan_id] = buf
+            buf["messages"].append(str(fan_message_en or "").strip())
+            buf["last_received_at"] = now_ts
+            buf["username"] = username or buf.get("username") or fan_id
+            if raw_tier_badge:
+                buf["raw_tier"] = raw_tier_badge
+            buf["ppv_unlocked"] = buf.get("ppv_unlocked", False) or bool(detected_ppv_unlocked)
+            buf["page"] = page
+            buf["now_dt"] = now_dt
+            timer = buf.get("timer")
+            if timer is not None:
+                timer.cancel()
+            debounce_sec = self._get_debounce_seconds()
+            timer = threading.Timer(debounce_sec, self._flush_debounced_fan_message, args=[fan_id])
+            timer.daemon = True
+            buf["timer"] = timer
+            timer.start()
+            logger.info(
+                f"[{self.char_id}] Debounce buffered msg for @{fan_id} "
+                f"(buffered={len(buf['messages'])}, flush_in={debounce_sec:.0f}s)"
+            )
+
+    def _flush_debounced_fan_message(self, fan_id: str) -> None:
+        """[Ticket 3.3] タイマー満了時にバッファ内メッセージを結合して1回だけ推論へ回す"""
+        with self._lock:
+            buf = self._incoming_debounce_buffer.pop(fan_id, None)
+        if buf is None:
+            return
+        messages = [m for m in buf.get("messages") or [] if str(m or "").strip()]
+        if not messages:
+            return
+        # 個々の受信DMメッセージをそれぞれDBへ保存 (履歴保全)
+        for m in messages:
+            try:
+                add_dm_message(
+                    char_id=self.char_id,
+                    fan_id=fan_id,
+                    sender="fan",
+                    content=m,
+                )
+            except Exception as e:
+                logger.warning(f"[{self.char_id}] Failed to record debounced fan message for @{fan_id}: {e}")
+        # 複数メッセージを改行で結合して1件の集約メッセージとして推論へ
+        combined_message_en = "\n".join(messages)
+        logger.info(
+            f"[{self.char_id}] Flushing debounced messages for @{fan_id} "
+            f"(count={len(messages)}, combined={len(combined_message_en)} chars)"
+        )
+        try:
+            self.handle_incoming_fan_message(
+                fan_id=fan_id,
+                username=str(buf.get("username") or fan_id),
+                fan_message_en=combined_message_en,
+                raw_tier_badge=buf.get("raw_tier"),
+                detected_ppv_unlocked=bool(buf.get("ppv_unlocked", False)),
+                page=buf.get("page"),
+                now_dt=buf.get("now_dt"),
+                async_schedule=True,
+            )
+        except Exception as e:
+            logger.error(f"[{self.char_id}] Debounce flush failed for @{fan_id}: {e}")
 
     def _extract_threads_snapshot(self, page: Any) -> List[Dict[str, Any]]:
         """左ペイン (.message-list a[href^='/messages/'] / app-messaging-group) から全スレッド情報を抽出する"""
@@ -2866,6 +3019,11 @@ class CharacterBotWorker:
             }"""
         )
         threads = snap if isinstance(snap, list) else []
+        # [Ticket 3.2] DM一覧DOMが正常取得できたことを記録 (ゾンビ判定の基準時刻)
+        self.last_successful_dom_poll_ts = time.time()
+        if self.recovery_stage > 0:
+            self.recovery_stage = 0
+            self._zombie_recovery_checked_ts = 0.0
         for t in threads:
             fid = str(t.get("fan_id") or "").strip()
             ghref = str(t.get("group_href") or "").strip()
@@ -3185,8 +3343,9 @@ class CharacterBotWorker:
                     self._checked_read_previews[fan_id] = preview_text
                     continue
 
+                # [Ticket 3.3] 受信連投デバウンス: 直ちに推論へ回さずバッファに追加し、debounce秒後に1回だけ処理
                 logger.info(f"[{self.char_id}] Incoming DM from @{fan_id} ({username}): '{unanswered_text[:100]}'")
-                res = self.handle_incoming_fan_message(
+                self._enqueue_debounced_fan_message(
                     fan_id=fan_id,
                     username=username,
                     fan_message_en=unanswered_text,
@@ -3194,11 +3353,9 @@ class CharacterBotWorker:
                     detected_ppv_unlocked=ppv_unlocked,
                     page=page,
                     now_dt=now_dt,
-                    async_schedule=True,
                 )
                 self._checked_read_previews[fan_id] = preview_text
-                if res.get("ok"):
-                    handled += 1
+                handled += 1
 
             if opened_any and not self._stop_event.is_set():
                 try:
@@ -3487,8 +3644,29 @@ class BotManager:
                 reason = "worker_thread_stopped"
             elif hb_ts > 0.0 and (now_ts - hb_ts) > effective_threshold:
                 reason = f"heartbeat_stale_{int(now_ts - hb_ts)}s"
+            else:
+                # [Ticket 3.2] ゾンビ検知: スレッド・ハートビートは生きているがDOM巡回が停止しているケース
+                dom_stale_sec = now_ts - float(worker.last_successful_dom_poll_ts or 0.0)
+                if dom_stale_sec > 180.0:
+                    reason = f"zombie_dom_stale_{int(dom_stale_sec)}s"
+                else:
+                    # 送信キュー先頭アイテムの予定時刻を120秒超過しても未送信 → ゾンビ
+                    if not worker._outbox_queue.empty():
+                        try:
+                            head = worker._outbox_queue.queue[0]
+                            next_ts = float(head.get("next_attempt_ts") or 0.0)
+                            if next_ts > 0.0 and (now_ts - next_ts) > 120.0:
+                                reason = f"zombie_outbox_head_stale_{int(now_ts - next_ts)}s"
+                        except Exception:
+                            pass
 
             if reason is not None:
+                # [Ticket 3.2] ゾンビ3段階自動リカバリ
+                if reason.startswith("zombie_"):
+                    zombie_handled = self._run_zombie_recovery(worker, cid, reason, now_ts)
+                    if zombie_handled:
+                        recovered.append({"char_id": cid, "reason": reason, "restarted": False})
+                        continue
                 ok = worker.force_restart(reason=reason)
                 if ok:
                     with self._lock:
@@ -3497,6 +3675,66 @@ class BotManager:
                     logger.warning(f"[{cid}] Watchdog auto-restarted passive monitoring worker ({reason})")
 
         return recovered
+
+    def _run_zombie_recovery(self, worker: "CharacterBotWorker", cid: str, reason: str, now_ts: float) -> bool:
+        """
+        [Ticket 3.2] ゾンビ検知時の3段階自動リカバリ。
+        Stage 1: page.reload() 実行 (recovery_stage=1)
+        Stage 2: リロード後も復旧しない場合は force_restart() (recovery_stage=2)
+        Stage 3: 再起動後も復旧しない/ログイン画面検知 → Discord緊急通知
+        True: リカバリ処理を実行済み (force_restartは不要)
+        False: 通常force_restartへ委譲
+        """
+        stage = int(getattr(worker, "recovery_stage", 0))
+
+        # Fanslyログイン画面検知 → 即Stage 3
+        page = worker._active_page
+        login_detected = False
+        if page is not None and hasattr(page, "evaluate"):
+            try:
+                login_detected = bool(page.evaluate(
+                    """() => {
+                        const el = document.querySelector('app-login-page, .login-form, app-login, form[action*="login"]');
+                        return !!(el || (location.pathname && location.pathname.indexOf('/login') !== -1));
+                    }"""
+                ))
+            except Exception:
+                login_detected = False
+
+        if login_detected or stage >= 2:
+            # Stage 3: 再起動後も復旧しない、またはログイン画面検知時
+            worker.last_error = "【重大】DM巡回が完全に停止またはログインセッション切れです"
+            send_discord_alert(
+                title=f"🚨 Fansly DM停止アラート ({cid})",
+                message="DM巡回DOM取得が停止し、自動再起動でも復旧しませんでした。セッション切れの可能性があります。",
+                level="ERROR",
+            )
+            return True
+
+        if stage == 0:
+            # Stage 1: ページリロード
+            logger.warning(f"[{cid}] Zombie recovery Stage 1: reloading page ({reason})")
+            if page is not None and hasattr(page, "reload"):
+                try:
+                    page.reload(wait_until="domcontentloaded")
+                except Exception as e:
+                    logger.warning(f"[{cid}] Zombie recovery Stage 1 reload failed: {e}")
+            worker.recovery_stage = 1
+            worker._zombie_recovery_checked_ts = now_ts
+            return True
+
+        if stage == 1:
+            # リロード後さらに2分復旧しない場合 → Stage 2: ブラウザ再起動
+            last_check = float(getattr(worker, "_zombie_recovery_checked_ts", 0.0))
+            if (now_ts - last_check) < 120.0:
+                return True  # 2分経過していないため待機継続
+            logger.warning(f"[{cid}] Zombie recovery Stage 2: browser restart ({reason})")
+            worker.force_restart(reason="zombie_recovery_browser_restart")
+            worker.recovery_stage = 2
+            worker._zombie_recovery_checked_ts = now_ts
+            return True
+
+        return True
 
     def _watchdog_loop(self) -> None:
         while not self._watchdog_stop_event.is_set() and self._monitoring_active:
