@@ -356,7 +356,81 @@ def api_monitoring_thread():
     if "decision_logs" not in detail:
         fan_obj = detail.get("fan") or {}
         detail["decision_logs"] = fan_obj.get("decision_logs") or []
+
+    # [Ticket 5.4] モニタリング詳細API: 新ステート・確定タグ・パイプラインログをトップレベルに露出
+    fan_obj = detail.get("fan") or {}
+    psych = fan_obj.get("psych_profile") or {}
+
+    # 新ステートマシンフィールドをトップレベルに展開
+    detail["sales_phase"] = str(fan_obj.get("sales_phase") or "1_Collect_Tags")
+    # state_step_turns: psych_profile._state_step_turns を優先 (本番パイプラインがここで管理)
+    # fans.state_step_turns カラムはフォールバック
+    detail["state_step_turns"] = int(psych.get("_state_step_turns") or fan_obj.get("state_step_turns") or 0)
+    detail["matched_tags"] = [str(t).strip() for t in (psych.get("matched_tags") or []) if str(t).strip()]
+    detail["facts"] = [str(f).strip() for f in (psych.get("facts") or []) if str(f).strip()]
+    detail["conversation_summary"] = str(psych.get("conversation_summary") or "").strip()
+
+    # 機械的な「次の遷移条件」算出 (evaluate_state_transition と同じロジックを簡易再現)
+    had_ppv = bool(psych.get("recommended_ppv_id"))
+    detail["next_transition_condition"] = _compute_next_transition_condition(
+        sales_phase=detail["sales_phase"],
+        state_step_turns=detail["state_step_turns"],
+        matched_tag_count=len(detail["matched_tags"]),
+        had_ppv=had_ppv,
+    )
+
     return jsonify({"ok": True, **detail})
+
+
+def _compute_next_transition_condition(
+    sales_phase: str,
+    state_step_turns: int,
+    matched_tag_count: int,
+    had_ppv: bool = False,
+) -> str:
+    """
+    [Ticket 5.4] 現在のステートと往復数から「次の遷移条件」を機械的に算出する。
+    evaluate_state_transition と同じ閾値 (tag_collect_target_count=1, max_turns=5, cooldown=3) を使用。
+    """
+    target = 1
+    max_turns = 5
+    cooldown_threshold = 3
+    pitch_no_inv_threshold = 3  # 2_Pitch_PPV (在庫なし) → 1_Collect_Tags 復帰の往復数
+
+    if sales_phase in ("1_Collect_Tags", "", "1_Icebreak", "2_Explore"):
+        remaining_tags = max(0, target - matched_tag_count)
+        remaining_turns = max(0, max_turns - state_step_turns)
+        if remaining_tags == 0 and remaining_turns == 0:
+            return "タグ揃い＆天井到達 → 2_Pitch_PPV へ即時遷移"
+        parts = []
+        if remaining_tags > 0:
+            parts.append(f"あと {remaining_tags} 個のタグ")
+        if remaining_turns > 0:
+            parts.append(f"天井まであと {remaining_turns} 往復")
+        return "または".join(parts) if parts else "タグ揃い → 2_Pitch_PPV へ遷移"
+
+    if sales_phase == "2_Pitch_PPV":
+        if had_ppv:
+            return "PPV提案送信成功 ➔ 3_Cooldown (state_step_turns=0)"
+        else:
+            remaining = max(0, pitch_no_inv_threshold - state_step_turns)
+            if remaining == 0:
+                return "3往復経過 → 1_Collect_Tags へ復帰 (state_step_turns=0 リセット)"
+            return f"在庫準備後に PPV 提案 / あと {remaining} 往復で 1_Collect_Tags 復帰"
+
+    if sales_phase == "3_Cooldown":
+        remaining = max(0, cooldown_threshold - state_step_turns)
+        if remaining == 0:
+            return "クールダウン完了 → 1_Collect_Tags へ復帰"
+        return f"クールダウン完了まで あと {remaining} 往復"
+
+    if sales_phase == "Escalate_Stop":
+        return "人間の介入・確認待ち"
+
+    if sales_phase == "Low_Priority":
+        return "省エネモード: 相槌のみ・フル推論を抑制"
+
+    return f"不明ステート '{sales_phase}' → 1_Collect_Tags へ正規化"
 
 
 @dashboard_bp.route("/api/monitoring/skip_to_manual", methods=["POST"])

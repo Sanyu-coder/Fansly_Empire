@@ -1586,6 +1586,8 @@ class SalesEngine:
         # Step 5b: 決定論的ステート遷移判定
         turn_count = max(1, len([m for m in msg_history if m.get("sender") == "fan"]))
         state_step_turns = int(psych_profile.get("_state_step_turns") or 0)
+        # 前回 PPV が提案されていたか判定 (psych_profile に recommended_ppv_id が残存 = 前回 PPV あり)
+        had_ppv_prev = bool(psych_profile.get("recommended_ppv_id"))
         new_state, recommended_ppv, state_meta = evaluate_state_transition(
             char_id=char_id,
             fan_id=fan_id,
@@ -1594,13 +1596,18 @@ class SalesEngine:
             ear_result=ear_result,
             consecutive_ppv_ignored=consecutive_ppv_ignored,
             state_step_turns=state_step_turns,
+            had_ppv_in_previous_turn=had_ppv_prev,
             db_path=db_path,
         )
         next_phase = new_state
 
-        # state_step_turns を次ターン用に更新 (遷移先が同一ステートなら +1、遷移したら 0)
+        # state_step_turns を次ターン用に更新
+        # 遷移先が同一ステート (Collect/Cooldown) なら +1、それ以外は 0
+        # 例外: 2_Pitch_PPV (ppv=None) → 1_Collect_Tags 復帰時は必ず 0 リセット
         if next_phase == norm_input_stage and next_phase in (STATE_COLLECT, STATE_COOLDOWN):
             new_step_turns = state_step_turns + 1
+        elif next_phase == STATE_COLLECT and norm_input_stage == STATE_PITCH:
+            new_step_turns = 0  # 2_Pitch_PPV → 1_Collect_Tags 復帰: 無限ループ防止
         else:
             new_step_turns = 0
 
@@ -1620,6 +1627,8 @@ class SalesEngine:
                 f"Got it babe... it's all yours for ${_price:.2f}. "
                 f"Say the word and I'll send it over."
             )
+        elif next_phase == STATE_PITCH and not recommended_ppv:
+            fallback_reply = "I'm preparing something super special just for you right now... hang tight for me 🖤"
         elif next_phase == STATE_COOLDOWN:
             fallback_reply = "Mmm, you've been so sweet lately. Let's just enjoy this for a bit."
         else:
@@ -1649,6 +1658,9 @@ class SalesEngine:
             psych_profile["dynamic_pricing"] = (
                 f"TAG_MATCH (${float(recommended_ppv.get('base_price_usd') or 0.0):.2f})"
             )
+            psych_profile["recommended_ppv_id"] = recommended_ppv.get("ppv_id")
+        else:
+            psych_profile["recommended_ppv_id"] = None
 
         psych_profile["_state_step_turns"] = new_step_turns
         psych_profile["_new_state_machine"] = {
@@ -1914,6 +1926,7 @@ def evaluate_state_transition(
     tag_collect_target_count: int = 1,
     tag_collect_max_turns: int = 5,
     cooldown_turns_threshold: int = 3,
+    had_ppv_in_previous_turn: bool = False,
     db_path: Optional[str] = None,
 ) -> Tuple[str, Optional[Dict[str, Any]], Dict[str, Any]]:
     """
@@ -1979,22 +1992,29 @@ def evaluate_state_transition(
     # --- 1_Collect_Tags ---
     if current_state in (STATE_COLLECT, "", "1_Icebreak", "2_Explore"):
         if has_buy_intent:
-            # [例外① 即買い飛び級] 在庫があれば即 2_Pitch_PPV
+            # [例外① 即買い飛び級] 購入意向あり → 2_Pitch_PPV へ即時遷移
+            # 在庫があれば PPV 付与、なければ ppv=None で遷移 (build_speaker_prompt が NO INVENTORY 指示を使用)
             ppv = match_ppv_deterministic(char_id, fan_id, matched_tags, ladder_step=1, is_rescue=False, db_path=db_path)
             if ppv is None and matched_tags:
                 ppv = match_ppv_deterministic(char_id, fan_id, matched_tags, ladder_step=1, is_rescue=True, db_path=db_path)
             if ppv:
                 meta["reason_ja"] = "即買い飛び級: 購入意向あり＆在庫一致 → 2_Pitch_PPV へ即時遷移"
                 meta["next_transition_condition"] = "PPV提案送信成功後に 3_Cooldown"
-                return STATE_PITCH, ppv, meta
+            else:
+                meta["reason_ja"] = "即買い飛び級: 購入意向ありだが在庫一致なし → 2_Pitch_PPV へ遷移 (在庫準備中)"
+                meta["next_transition_condition"] = "在庫準備完了後に PPV 提案 / 3往復で 1_Collect_Tags 復帰"
+            return STATE_PITCH, ppv, meta
 
-        # [救済① 天井到達] 往復数 >= tag_collect_max_turns → 汎用PPVで強制遷移
+        # [救済① 天井到達] 往復数 >= tag_collect_max_turns → 2_Pitch_PPV へ強制遷移
         if turns >= int(tag_collect_max_turns or 5):
             ppv = match_ppv_deterministic(char_id, fan_id, matched_tags, ladder_step=1, is_rescue=True, db_path=db_path)
             if ppv:
                 meta["reason_ja"] = f"天井到達 ({turns}往復 >= {tag_collect_max_turns}) → 汎用PPVで 2_Pitch_PPV へ強制遷移"
                 meta["next_transition_condition"] = "PPV提案送信成功後に 3_Cooldown"
-                return STATE_PITCH, ppv, meta
+            else:
+                meta["reason_ja"] = f"天井到達 ({turns}往復 >= {tag_collect_max_turns})＆救済PPVなし → 2_Pitch_PPV へ強制遷移 (在庫準備中)"
+                meta["next_transition_condition"] = "在庫準備完了後に PPV 提案 / 3往復で 1_Collect_Tags 復帰"
+            return STATE_PITCH, ppv, meta
 
         # [通常ルート] 有効タグが目標数揃い ＆ 一致する未購入PPV在庫あり → 2_Pitch_PPV
         if len(matched_tags) >= int(tag_collect_target_count or 1):
@@ -2003,9 +2023,10 @@ def evaluate_state_transition(
                 meta["reason_ja"] = f"タグ {len(matched_tags)} 個で対象PPV在庫一致 → 2_Pitch_PPV へ遷移"
                 meta["next_transition_condition"] = "PPV提案送信成功後に 3_Cooldown"
                 return STATE_PITCH, ppv, meta
+            # タグは揃っているが在庫なし → 1_Collect_Tags 維持 (別タグで在庫に当たる可能性)
+            meta["reason_ja"] = f"タグ {len(matched_tags)} 個で揃ったが在庫一致なし → 1_Collect_Tags 維持、別タグを聞き出す"
 
         # 該当PPVが無い → 1_Collect_Tags 維持 (NEED受け流し)
-        meta["reason_ja"] = "在庫一致PPVなし → 1_Collect_Tags 維持、別タグを聞き出す"
         remaining_tags = max(0, int(tag_collect_target_count or 1) - len(matched_tags))
         remaining_turns = max(0, int(tag_collect_max_turns or 5) - turns)
         meta["next_transition_condition"] = (
@@ -2015,10 +2036,18 @@ def evaluate_state_transition(
 
     # --- 2_Pitch_PPV ---
     if current_state == STATE_PITCH:
-        # PPV提案メッセージ送信成功後は呼び出し側が即 3_Cooldown へ更新する。
-        # ここでは提案済み状態を維持（送信イベントを meta に付与）。
-        meta["reason_ja"] = "2_Pitch_PPV 滞在: 提案済み、ファンの反応待ち"
-        meta["next_transition_condition"] = "PPV提案送信成功 ➔ 3_Cooldown (state_step_turns=0)"
+        if had_ppv_in_previous_turn:
+            # 前回 PPV 提案済み → ファンの反応待ち (購入で 3_Cooldown)
+            meta["reason_ja"] = "2_Pitch_PPV 滞在: 提案済み、ファンの反応待ち"
+            meta["next_transition_condition"] = "PPV提案送信成功 ➔ 3_Cooldown (state_step_turns=0)"
+        else:
+            # 前回 PPV なし (在庫0件で遷移した case)
+            if turns >= 3:
+                meta["reason_ja"] = f"2_Pitch_PPV (在庫なし) {turns}往復経過 → 1_Collect_Tags へ復帰 (state_step_turns=0 リセット)"
+                meta["next_transition_condition"] = "タグヒアリング再開 (state_step_turns=0)"
+                return STATE_COLLECT, None, meta
+            meta["reason_ja"] = "2_Pitch_PPV 滞在: 在庫準備中、ファンの反応待ち"
+            meta["next_transition_condition"] = f"在庫準備後に PPV 提案 / あと {max(0, 3 - turns)} 往復で 1_Collect_Tags 復帰"
         return STATE_PITCH, None, meta
 
     # --- 3_Cooldown ---
@@ -2074,6 +2103,13 @@ def build_speaker_prompt(
         instruction = (
             f"SALES DIRECTIVE: Pitch the confirmed PPV now. Price ${price}. "
             f"Hook: {hint}. Confidently present it at the exact price, make it irresistible, do NOT over-promise."
+        )
+    elif state == STATE_PITCH and not chosen_ppv:
+        instruction = (
+            "PITCH DIRECTIVE (NO INVENTORY): The fan wants to buy or reached pitch stage, "
+            "but matching inventory is currently empty. Acknowledge their interest warmly, "
+            "tease that something special is being prepared right now, and keep anticipation alive. "
+            "Do NOT ask about new tags."
         )
     elif state == STATE_COLLECT:
         instruction = (
