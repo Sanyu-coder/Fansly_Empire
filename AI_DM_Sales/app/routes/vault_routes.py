@@ -1107,6 +1107,103 @@ def api_vault_delete():
     return jsonify({"ok": True, "char_id": char_id, "deleted_ppv_id": ppv_id, "remaining_count": len(remaining)})
 
 
+@vault_bp.route("/api/vault/transfer_char", methods=["POST"])
+def api_vault_transfer_char():
+    """
+    PPV素材を別のキャラクターの武器庫へ移管するAPI。
+    Body: {"source_char_id": "char_a", "target_char_id": "char_b", "ppv_id": "char_a_vault_001"}
+    処理内容:
+      1) ソースキャラの vault_index.json からアイテムを削除
+      2) メディアファイル（本体＋previews/＋originals/）をターゲットキャラの ppv_vault/ へコピー
+      3) ターゲットキャラの vault_index.json にアイテムを追加（char_id を更新）
+      4) 両キャラの ppv_vault DB を同期
+    """
+    import shutil
+
+    data = request.get_json(silent=True) or {}
+    source_char_id = str(data.get("source_char_id") or "").strip()
+    target_char_id = str(data.get("target_char_id") or "").strip()
+    ppv_id = str(data.get("ppv_id") or "").strip()
+
+    if not source_char_id or not target_char_id or not ppv_id:
+        return jsonify({"ok": False, "error": "source_char_id, target_char_id, and ppv_id are required"}), 400
+    if source_char_id == target_char_id:
+        return jsonify({"ok": False, "error": "source and target character must be different"}), 400
+
+    # ソースキャラのアイテムを検索
+    source_items = load_vault_items(source_char_id)
+    target_item = None
+    for it in source_items:
+        if it.get("ppv_id") == ppv_id:
+            target_item = it
+            break
+    if not target_item:
+        return jsonify({"ok": False, "error": f"PPV item '{ppv_id}' not found in {source_char_id}"}), 404
+
+    # ターゲットキャラで同じ ppv_id が存在しないか確認
+    target_items = load_vault_items(target_char_id)
+    for it in target_items:
+        if it.get("ppv_id") == ppv_id:
+            return jsonify({"ok": False, "error": f"PPV item '{ppv_id}' already exists in {target_char_id}"}), 409
+
+    # メディアファイルをターゲットキャラへコピー
+    source_paths = get_char_paths(source_char_id)
+    target_paths = get_char_paths(target_char_id)
+    filename = str(target_item.get("filename") or "")
+    if filename:
+        src_media = os.path.join(source_paths["vault_dir"], filename)
+        dst_media = os.path.join(target_paths["vault_dir"], filename)
+        if os.path.isfile(src_media):
+            os.makedirs(target_paths["vault_dir"], exist_ok=True)
+            shutil.copy2(src_media, dst_media)
+
+        # previews/ のぼかしプレビューもコピー
+        blur_filename = str(target_item.get("blur_preview_filename") or "")
+        if blur_filename and "/previews/" in blur_filename:
+            stem = os.path.basename(blur_filename)
+            src_blur = os.path.join(source_paths["vault_dir"], "previews", stem)
+            dst_blur_dir = os.path.join(target_paths["vault_dir"], "previews")
+            if os.path.isfile(src_blur):
+                os.makedirs(dst_blur_dir, exist_ok=True)
+                shutil.copy2(src_blur, os.path.join(dst_blur_dir, stem))
+
+        # originals/ の原本もコピー
+        orig_dir_src = os.path.join(source_paths["vault_dir"], ORIGINALS_SUBDIR_NAME)
+        if os.path.isdir(orig_dir_src):
+            orig_file_src = os.path.join(orig_dir_src, filename)
+            if os.path.isfile(orig_file_src):
+                orig_dir_dst = os.path.join(target_paths["vault_dir"], ORIGINALS_SUBDIR_NAME)
+                os.makedirs(orig_dir_dst, exist_ok=True)
+                shutil.copy2(orig_file_src, os.path.join(orig_dir_dst, filename))
+
+    # ソースキャラからアイテムを削除して保存
+    source_items = [it for it in source_items if it.get("ppv_id") != ppv_id]
+    save_vault_items(source_char_id, source_items)
+
+    # ターゲットキャラにアイテムを追加（char_id を更新）
+    new_item = dict(target_item)
+    new_item["char_id"] = target_char_id
+    target_items.append(new_item)
+    save_vault_items(target_char_id, target_items)
+
+    tx_stats = get_ppv_stats_by_char(target_char_id).get(ppv_id) or {
+        "offers_count": 0,
+        "purchases_count": 0,
+        "revenue_usd": 0.0,
+        "cvr_percent": 0.0,
+    }
+    return jsonify(
+        {
+            "ok": True,
+            "source_char_id": source_char_id,
+            "target_char_id": target_char_id,
+            "ppv_id": ppv_id,
+            "message": f"素材 '{ppv_id}' を {source_char_id} から {target_char_id} へ移管しました",
+            "item": {**new_item, "char_id": target_char_id, **tx_stats},
+        }
+    )
+
+
 @vault_bp.route("/api/vault/generate_blur_previews", methods=["POST"])
 def api_vault_generate_blur_previews():
     """既存PPV素材（特定キャラまたは全キャラ）に対して全画面ぼかしプレビュー画像を一括生成するAPI"""

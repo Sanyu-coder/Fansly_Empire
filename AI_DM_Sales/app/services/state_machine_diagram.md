@@ -1,4 +1,4 @@
-# 新ステートマシン 遷移図（Ticket 4.5 / 7.2）
+# 新ステートマシン 遷移図（Ticket 4.5 / 7.2 / 破綻修正）
 
 ## ステート一覧
 
@@ -34,8 +34,11 @@ stateDiagram-v2
 
     %% ============ 2_Pitch_PPV からの遷移 ============
     
+    %% [破綻1修正] 購入意向検出 → 3_Cooldown
+    2_Pitch_PPV --> 3_Cooldown : has_buy_intent=True<br/>（購入意向 → クールダウンへ）
+
     %% 前回PPV提案済み → 滞在（ファンの反応待ち）
-    2_Pitch_PPV --> 2_Pitch_PPV : 前回PPV提案済み<br/>（ファンの反応待ち）
+    2_Pitch_PPV --> 2_Pitch_PPV : 前回PPV提案済み 且つ<br/>has_buy_intent=False<br/>（ファンの反応待ち）
     
     %% 前回PPVなし（在庫0件で遷移）→ 3往復で復帰
     2_Pitch_PPV --> 1_Collect_Tags : 前回PPVなし 且つ<br/>state_step_turns >= 3<br/>（タグヒアリング再開）
@@ -43,14 +46,23 @@ stateDiagram-v2
 
     %% ============ 3_Cooldown からの遷移 ============
     
+    %% [破綻2修正] 冷却中の購入意向救済
+    3_Cooldown --> 2_Pitch_PPV : has_buy_intent=True<br/>且つ在庫一致あり<br/>（救済復帰 → PPV提案）
+    3_Cooldown --> 1_Collect_Tags : has_buy_intent=True<br/>且つ在庫一致なし<br/>（救済復帰 → タグヒアリング）
+
+    %% 通常クールダウン
     3_Cooldown --> 1_Collect_Tags : state_step_turns >= 3<br/>（クールダウン終了 → タグヒアリング再開）
-    3_Cooldown --> 3_Cooldown : state_step_turns < 3<br/>（余韻・冷却中）
+    3_Cooldown --> 3_Cooldown : state_step_turns < 3<br/>且つ has_buy_intent=False<br/>（余韻・冷却中）
 
     %% ============ 例外ステートからの復帰 ============
     
-    %% 手動介入 / 人間確認後 → 通常フローへ復帰
-    Escalate_Stop --> 1_Collect_Tags : 人間介入完了<br/>（管理画面で状態リセット）
-    Low_Priority --> 1_Collect_Tags : 購入発生<br/>または一定期間経過<br/>（通常フロー復帰）
+    %% [破綻3a修正] Escalate_Stop 復帰
+    Escalate_Stop --> 1_Collect_Tags : is_escalated_cleared=True<br/>（人間介入完了 → タグヒアリング再開）
+    Escalate_Stop --> Escalate_Stop : is_escalated_cleared=False<br/>（未解除 → 人間介入待ち）
+
+    %% [破綻3b修正] Low_Priority 復帰
+    Low_Priority --> 1_Collect_Tags : 購入発生 (is_unlocked=1)<br/>（通常フロー復帰）
+    Low_Priority --> Low_Priority : 購入なし<br/>（省エネモード継続）
 
     %% ============ 未知ステート正規化 ============
     
@@ -63,27 +75,36 @@ stateDiagram-v2
 ## 判定優先順位（上から順に評価）
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│  1. 危険ワード検知                                              │
-│     → 該当: 即 Escalate_Stop（全ステートから）                 │
-├─────────────────────────────────────────────────────────────────┤
-│  2. 省エネ降格判定                                              │
-│     → 無料フォロワー 且つ consecutive_ppv_ignored >= 2          │
-│     → 該当: 即 Low_Priority（全ステートから）                  │
-├─────────────────────────────────────────────────────────────────┤
-│  3. 現在ステートに基づく遷移判定                                │
-│     ├─ 1_Collect_Tags:                                         │
-│     │   ├─ 例外①: has_buy_intent → 2_Pitch_PPV（即買い飛び級）│
-│     │   ├─ 救済①: turns >= 5 → 2_Pitch_PPV（天井到達）        │
-│     │   ├─ 通常: タグ>=目標数 且つ 在庫あり → 2_Pitch_PPV      │
-│     │   └─ 維持: タグ未充足/在庫なし → 1_Collect_Tags          │
-│     ├─ 2_Pitch_PPV:                                            │
-│     │   ├─ 前回PPVあり → 滞在（反応待ち）                      │
-│     │   └─ 前回PPVなし 且つ turns>=3 → 1_Collect_Tags（復帰）  │
-│     └─ 3_Cooldown:                                             │
-│         ├─ turns >= 3 → 1_Collect_Tags（復帰）                 │
-│         └─ turns < 3 → 滞在（冷却中）                          │
-└─────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│  0. 例外ステート復帰判定 (Escalate_Stop / Low_Priority)                  │
+│     ├─ Escalate_Stop + is_escalated_cleared → 1_Collect_Tags           │
+│     ├─ Escalate_Stop 未解除 → Escalate_Stop 維持                        │
+│     ├─ Low_Priority + 購入済み (is_unlocked=1) → 1_Collect_Tags         │
+│     └─ Low_Priority 購入なし → Low_Priority 維持                        │
+├─────────────────────────────────────────────────────────────────────────┤
+│  1. 危険ワード検知                                                       │
+│     → 該当: 即 Escalate_Stop（全ステートから）                          │
+├─────────────────────────────────────────────────────────────────────────┤
+│  2. 省エネ降格判定                                                       │
+│     → 無料フォロワー 且つ consecutive_ppv_ignored >= 2                   │
+│     → 該当: 即 Low_Priority（全ステートから）                           │
+├─────────────────────────────────────────────────────────────────────────┤
+│  3. 現在ステートに基づく遷移判定                                         │
+│     ├─ 1_Collect_Tags:                                                  │
+│     │   ├─ 例外①: has_buy_intent → 2_Pitch_PPV（即買い飛び級）         │
+│     │   ├─ 救済①: turns >= 5 → 2_Pitch_PPV（天井到達）                 │
+│     │   ├─ 通常: タグ>=目標数 且つ 在庫あり → 2_Pitch_PPV               │
+│     │   └─ 維持: タグ未充足/在庫なし → 1_Collect_Tags                   │
+│     ├─ 2_Pitch_PPV:                                                     │
+│     │   ├─ [破綻1] has_buy_intent → 3_Cooldown（購入意向 → クールダウン）│
+│     │   ├─ 前回PPVあり → 滞在（反応待ち）                               │
+│     │   └─ 前回PPVなし 且つ turns>=3 → 1_Collect_Tags（復帰）           │
+│     └─ 3_Cooldown:                                                      │
+│         ├─ [破綻2] has_buy_intent + 在庫あり → 2_Pitch_PPV（救済）      │
+│         ├─ [破綻2] has_buy_intent + 在庫なし → 1_Collect_Tags（救済）   │
+│         ├─ turns >= 3 → 1_Collect_Tags（復帰）                          │
+│         └─ turns < 3 → 滞在（冷却中）                                   │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## state_step_turns の更新ルール
@@ -91,11 +112,17 @@ stateDiagram-v2
 | 遷移 | state_step_turns |
 |------|-----------------|
 | 1_Collect_Tags → 1_Collect_Tags（滞在） | +1 |
-| 3_Cooldown → 3_Cooldown（滞在） | +1 |
-| 1_Collect_Tags → 2_Pitch_PPV | 0（リセット） |
-| 2_Pitch_PPV → 1_Collect_Tags（復帰） | 0（リセット） |
 | 2_Pitch_PPV → 2_Pitch_PPV（滞在） | +1 |
-| 3_Cooldown → 1_Collect_Tags（復帰） | 0（リセット） |
+| 3_Cooldown → 3_Cooldown（滞在） | +1 |
+| Escalate_Stop → Escalate_Stop（滞在） | 維持 |
+| Low_Priority → Low_Priority（滞在） | 維持 |
+| 1_Collect_Tags → 2_Pitch_PPV | 0（リセット） |
+| 2_Pitch_PPV → 3_Cooldown（購入意向） | 0（リセット） |
+| 2_Pitch_PPV → 1_Collect_Tags（復帰） | 0（リセット） |
+| 3_Cooldown → 2_Pitch_PPV（救済） | 0（リセット） |
+| 3_Cooldown → 1_Collect_Tags（復帰/救済） | 0（リセット） |
+| Escalate_Stop → 1_Collect_Tags（復帰） | 0（リセット） |
+| Low_Priority → 1_Collect_Tags（復帰） | 0（リセット） |
 
 ## 設定値（system_settings テーブル参照）
 

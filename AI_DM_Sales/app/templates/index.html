@@ -236,7 +236,7 @@
       flex: 1;
       min-height: 0;
       flex-direction: column;
-      overflow: hidden;
+      overflow-y: auto;
       padding: 12px 14px;
       gap: 10px;
     }
@@ -263,6 +263,86 @@
     .stat-label { font-size: 10.5px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .stat-value { font-size: 16px; font-weight: 800; color: #fff; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .stat-sub { font-size: 10px; color: #a78bfa; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    /* TICKET-09: 未返信件数カード（クリックで絞り込みトグル） */
+    .stat-card.unanswered-card { cursor: pointer; transition: border-color .15s ease, box-shadow .15s ease; }
+    .stat-card.unanswered-card:hover { border-color: rgba(236, 72, 153, 0.55); }
+    .stat-card.unanswered-card.active {
+      border-color: rgba(236, 72, 153, 0.85);
+      box-shadow: 0 0 0 1px rgba(236, 72, 153, 0.5), 0 0 10px rgba(236, 72, 153, 0.35);
+    }
+    .stat-card.unanswered-card.active .stat-value { color: #f9a8d4; }
+
+    /* TICKET-09: スレッド一覧 フィルター＆ソートバー */
+    .thread-filter-bar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 8px;
+      border-bottom: 1px solid var(--border);
+      background: #14102a;
+      flex-shrink: 0;
+      flex-wrap: wrap;
+    }
+    .thread-filter-bar .tfb-label { font-size: 10px; color: var(--text-muted); font-weight: 700; }
+    .thread-filter-bar select {
+      background: var(--bg-card);
+      color: #e2e8f0;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 11px;
+      padding: 3px 5px;
+      cursor: pointer;
+      max-width: 130px;
+    }
+    .thread-filter-bar .tfb-count { font-size: 10.5px; color: #a78bfa; margin-left: auto; white-space: nowrap; }
+
+    /* TICKET-09: top-header 監視インジケーター（電波パルス） */
+    .monitor-indicator {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: #161229;
+      font-size: 11px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .monitor-indicator .mi-dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: #64748b;
+      flex-shrink: 0;
+    }
+    .monitor-indicator.running { border-color: rgba(74, 222, 128, 0.6); }
+    .monitor-indicator.running .mi-dot { background: #4ade80; }
+    .monitor-indicator.running .mi-wave {
+      position: relative;
+      width: 16px;
+      height: 12px;
+      flex-shrink: 0;
+    }
+    .monitor-indicator.running .mi-wave::before,
+    .monitor-indicator.running .mi-wave::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      border: 1.5px solid #4ade80;
+      border-radius: 50%;
+      opacity: 0;
+    }
+    .monitor-indicator.running .mi-wave::before { width: 10px; height: 10px; animation: mi-pulse 1.8s ease-out infinite; }
+    .monitor-indicator.running .mi-wave::after { width: 10px; height: 10px; animation: mi-pulse 1.8s ease-out infinite .9s; }
+    .monitor-indicator .mi-wave { display: none; }
+    .monitor-indicator.running .mi-wave { display: block; }
+    @keyframes mi-pulse {
+      0%   { transform: translate(-50%, -50%) scale(0.4); opacity: 0.9; }
+      100% { transform: translate(-50%, -50%) scale(2.6); opacity: 0; }
+    }
 
     .alert-banner-box {
       background: rgba(239, 68, 68, 0.12);
@@ -517,8 +597,6 @@
       color: #fff;
     }
     .vault-grid {
-      flex: 1;
-      overflow-y: auto;
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(560px, 1fr));
       gap: 14px;
@@ -532,7 +610,6 @@
       overflow: hidden;
       display: grid;
       grid-template-columns: 196px minmax(0, 1fr);
-      min-height: 270px;
       transition: border-color 0.15s ease, box-shadow 0.15s ease;
     }
     .vault-card:hover { border-color: var(--border-light); }
@@ -655,6 +732,15 @@
       gap: 4px;
       pointer-events: none;
     }
+    /* サムネイル上のバッジは明るい画像でも読めるよう高不透明度の黒背景に変更 */
+    .vault-thumb-overlay .badge {
+      background: rgba(8, 6, 14, 0.82);
+      border-color: rgba(255, 255, 255, 0.22);
+      color: #fff;
+      backdrop-filter: blur(2px);
+      -webkit-backdrop-filter: blur(2px);
+    }
+    .vault-thumb-overlay .badge.alert { color: #fca5a5; }
     .vault-card-body {
       padding: 9px 11px;
       display: flex;
@@ -1426,6 +1512,11 @@
 
     <!-- 右側クイックアクション -->
     <div class="header-right">
+      <span class="monitor-indicator" id="monitorIndicator">
+        <span class="mi-dot"></span>
+        <span class="mi-wave"></span>
+        <span id="monitorIndicatorLabel">監視: 待機中</span>
+      </span>
       <button class="btn" onclick="openSettingsModal()">⚙️ 設定</button>
       <button class="btn btn-primary" onclick="openAddPpvModal()">＋ PPV素材追加</button>
     </div>
@@ -1465,6 +1556,11 @@
           <span class="stat-value" id="statBotState" style="font-size:15px;">待機中</span>
           <span class="stat-sub" id="statSleepInfo">睡眠制御: OFF (19:00-22:00)</span>
         </div>
+        <div class="stat-card unanswered-card" id="unansweredCard" onclick="toggleUnansweredFilter()" title="クリックで「未返信のみ」に絞り込みを切り替え">
+          <span class="stat-label">📩 未返信件数</span>
+          <span class="stat-value" id="statUnanswered" style="color:#f9a8d4;">0</span>
+          <span class="stat-sub" id="statUnansweredSub">クリックで絞り込み</span>
+        </div>
       </div>
 
       <div id="alertBannerBox" class="alert-banner-box" style="display:none;">
@@ -1480,6 +1576,25 @@
           <div class="pane-header">
             <span>💬 直近スレッド一覧（最新順）</span>
             <button class="btn btn-sm" onclick="refreshMonitoring()">↻ 更新</button>
+          </div>
+          <div class="thread-filter-bar" id="threadFilterBar">
+            <span class="tfb-label">絞り込み</span>
+            <select id="threadFilterSelect" onchange="setThreadFilter(this.value)">
+              <option value="all">すべて</option>
+              <option value="unanswered">未返信のみ</option>
+              <option value="escalated">要介入</option>
+              <option value="manual">手動保留中</option>
+              <option value="low">省エネ</option>
+            </select>
+            <span class="tfb-label">キャラ</span>
+            <select id="threadCharSelect" onchange="setThreadCharFilter(this.value)"></select>
+            <span class="tfb-label">並び</span>
+            <select id="threadSortSelect" onchange="setThreadSort(this.value)">
+              <option value="unanswered">未返信優先</option>
+              <option value="latest">新着順</option>
+              <option value="spent">課金額順</option>
+            </select>
+            <span class="tfb-count" id="threadFilterCount"></span>
           </div>
           <div id="threadListContainer" class="thread-list"></div>
         </div>
@@ -2272,6 +2387,9 @@
       manualRawMarkdown: "",
       stageThresholds: { "1_Icebreak": 40, "2_Explore": 70, "3_Lead_Pitch": 85 },
       isPollingInFlight: false,
+      threadFilter: "all",
+      threadCharFilter: "all",
+      threadSort: "unanswered",
     };
 
     function showToast(msg) {
@@ -2654,6 +2772,63 @@
       }
     }
 
+    /* ==========================================
+       TICKET-09: 監視インジケーター＆スレッドフィルター制御
+    ========================================== */
+    function updateMonitorIndicator() {
+      const el = document.getElementById("monitorIndicator");
+      const label = document.getElementById("monitorIndicatorLabel");
+      if (!el) return;
+      // DM監視（受信巡回➔返信作成の通常動作）が稼働しているか：worker の monitoring_active/running
+      const anyMonitoring = (state.characters || []).some(c => c.monitoring_active || c.running);
+      if (anyMonitoring) {
+        el.classList.add("running");
+        if (label) label.textContent = "DM監視: 稼働中";
+      } else {
+        el.classList.remove("running");
+        if (label) label.textContent = "DM監視: 停止中";
+      }
+    }
+
+    function toggleUnansweredFilter() {
+      state.threadFilter = state.threadFilter === "unanswered" ? "all" : "unanswered";
+      const sel = document.getElementById("threadFilterSelect");
+      if (sel) sel.value = state.threadFilter;
+      rerenderThreads();
+    }
+
+    function setThreadFilter(value) {
+      state.threadFilter = value || "all";
+      rerenderThreads();
+    }
+
+    function setThreadCharFilter(value) {
+      state.threadCharFilter = value || "all";
+      rerenderThreads();
+    }
+
+    function setThreadSort(value) {
+      state.threadSort = value || "latest";
+      rerenderThreads();
+    }
+
+    function rerenderThreads() {
+      // 直前の poll 取得済みスレッド（state 保存分）で再描画
+      if (state._lastThreads && state._lastThreads.length > 0) {
+        renderMonitoringData(state._lastSummary || {}, state._lastAlerts || [], state._lastThreads, true);
+      }
+    }
+
+    function populateThreadCharSelect() {
+      const sel = document.getElementById("threadCharSelect");
+      if (!sel) return;
+      let html = `<option value="all">全キャラ</option>`;
+      for (const c of (state.characters || [])) {
+        html += `<option value="${escapeHtml(c.char_id)}" ${state.threadCharFilter === c.char_id ? 'selected' : ''}>${escapeHtml(c.display_name || c.char_id)}</option>`;
+      }
+      sel.innerHTML = html;
+    }
+
     function populateCharSelects() {
       const selects = ["modalPpvCharSelect", "settingsCharSelect"];
       const effId = getEffectiveCharId();
@@ -2727,6 +2902,13 @@
     }
 
     function renderMonitoringData(summary, alerts, threads, isBackgroundPoll = false) {
+      // TICKET-09: 直前データを保持（フィルター/ソート変更時の再描画用）
+      if (Array.isArray(threads) && threads.length > 0) {
+        state._lastThreads = threads;
+        state._lastSummary = summary || {};
+        state._lastAlerts = alerts || [];
+      }
+      populateThreadCharSelect();
       if (summary) {
         document.getElementById("statTodayRev").textContent = `$${Number(summary.today_revenue_usd || 0).toFixed(2)}`;
         document.getElementById("statTotalRev").textContent = `累計: $${Number(summary.total_revenue_usd || 0).toFixed(2)}`;
@@ -2803,21 +2985,53 @@
 
       // 左ペイン：直近スレッド一覧（差分検知更新）
       const threadList = document.getElementById("threadListContainer");
-      if (!threads || threads.length === 0) {
-        threadList.innerHTML = `<div style="padding:16px; color:var(--text-muted); font-size:12px; text-align:center;">該当するスレッドがありません</div>`;
-        return;
+      const allThreads = threads || [];
+
+      // TICKET-09: 未返信件数カード更新
+      const unansweredCount = allThreads.filter(t => t.has_unanswered_fan).length;
+      const statUnansweredEl = document.getElementById("statUnanswered");
+      if (statUnansweredEl) statUnansweredEl.textContent = `${unansweredCount}`;
+      const uCard = document.getElementById("unansweredCard");
+      if (uCard) {
+        uCard.classList.toggle("active", state.threadFilter === "unanswered");
+        const uSub = document.getElementById("statUnansweredSub");
+        if (uSub) uSub.textContent = state.threadFilter === "unanswered" ? "絞り込み中 (OFFで解除)" : "クリックで絞り込み";
       }
 
-      const newThreadsSig = JSON.stringify(threads.map(t => [
+      // TICKET-09: フィルター＆ソート適用
+      let filtered = allThreads.filter(t => {
+        if (state.threadCharFilter !== "all" && t.char_id !== state.threadCharFilter) return false;
+        switch (state.threadFilter) {
+          case "unanswered": return !!t.has_unanswered_fan;
+          case "escalated": return !!t.is_escalated;
+          case "manual": return !!(t.manual_hold || t.is_manual_overdue);
+          case "low": return !!t.is_low_priority;
+          default: return true;
+        }
+      });
+      if (state.threadSort === "unanswered") {
+        filtered = filtered.slice().sort((a, b) => (b.has_unanswered_fan ? 1 : 0) - (a.has_unanswered_fan ? 1 : 0));
+      } else if (state.threadSort === "spent") {
+        filtered = filtered.slice().sort((a, b) => Number(b.total_spent_usd || 0) - Number(a.total_spent_usd || 0));
+      }
+      const countEl = document.getElementById("threadFilterCount");
+      if (countEl) countEl.textContent = `${filtered.length} / ${allThreads.length} 件`;
+
+      if (filtered.length === 0) {
+        threadList.innerHTML = `<div style="padding:16px; color:var(--text-muted); font-size:12px; text-align:center;">絞り込み条件に該当するスレッドがありません</div>`;
+      }
+
+      const newThreadsSig = JSON.stringify(filtered.map(t => [
         t.char_id, t.fan_id, t.last_message_content, t.last_message_sender, t.sales_phase,
         t.total_spent_usd, t.is_escalated, t.is_low_priority, t.manual_hold, t.is_manual_overdue,
         t.pending_reply ? t.pending_reply.remaining_seconds : -1,
+        state.threadFilter, state.threadCharFilter, state.threadSort,
         state.activeThread ? `${state.activeThread.char_id}:${state.activeThread.fan_id}` : ""
       ]));
 
-      if (!isBackgroundPoll || newThreadsSig !== state.lastThreadsSig) {
+      if (filtered.length > 0 && (!isBackgroundPoll || newThreadsSig !== state.lastThreadsSig)) {
         state.lastThreadsSig = newThreadsSig;
-        threadList.innerHTML = threads.map(t => {
+        threadList.innerHTML = filtered.map(t => {
           const isCurrent = state.activeThread && state.activeThread.char_id === t.char_id && state.activeThread.fan_id === t.fan_id;
           const alertBadge = t.is_escalated ? `<span class="badge badge-alert">🚨 要介入</span>` : "";
           const overdueBadge = t.is_manual_overdue
@@ -2851,16 +3065,19 @@
         }).join("");
       }
 
-      if (!state.activeThread && threads.length > 0) {
-        openThread(threads[0].char_id, threads[0].fan_id);
+      if (!state.activeThread && filtered.length > 0) {
+        openThread(filtered[0].char_id, filtered[0].fan_id);
       } else if (!isBackgroundPoll && state.activeThread) {
-        const stillExists = threads.some(t => t.char_id === state.activeThread.char_id && t.fan_id === state.activeThread.fan_id);
+        const stillExists = filtered.some(t => t.char_id === state.activeThread.char_id && t.fan_id === state.activeThread.fan_id);
         if (stillExists) {
           openThread(state.activeThread.char_id, state.activeThread.fan_id);
-        } else if (threads.length > 0) {
-          openThread(threads[0].char_id, threads[0].fan_id);
+        } else if (filtered.length > 0) {
+          openThread(filtered[0].char_id, filtered[0].fan_id);
         }
       }
+
+      // TICKET-09: ヘッダー監視インジケーター更新（稼働状態と2連動）
+      updateMonitorIndicator();
     }
 
     async function openThread(charId, fanId) {
@@ -3490,42 +3707,26 @@
         syncDefaultPricesCache(null, data.default_prices_by_char);
         const items = data.items || [];
         renderVaultGrid(items);
-        // [Ticket 6.2] 各カードにカテゴリ別タグチップを描画
+        // [Ticket 6.2] 各カードにカテゴリ別タグのドロップダウン選択肢を填充
         const categories = await loadMasterTagsIfNeeded();
         items.forEach(it => {
-          const ck = `${it.char_id}_${it.ppv_id}`;
-          const container = document.getElementById(`vchips-${ck}`);
-          if (!container) return;
+          const ck = `${it.char_id}__${it.ppv_id}`;
           const ct = it.category_tags || {};
-          container.innerHTML = "";
           PPV_TAG_CATEGORIES.forEach(cat => {
+            const sel = document.getElementById(`vtag_${cat.key}-${ck}`);
+            if (!sel) return;
             const catData = (categories || {})[cat.key] || {};
             const tags = catData.tags || [];
-            if (tags.length === 0) return;
-            const section = document.createElement("div");
-            section.className = "cat-tag-section";
-            const label = document.createElement("div");
-            label.className = "cat-label";
-            label.textContent = cat.label;
-            section.appendChild(label);
-            const row = document.createElement("div");
-            row.className = "chip-row";
+            // 既存の <option>（未設定）を保持したまま選択肢を再填充
+            const currentVal = ct[cat.key] || "";
+            sel.innerHTML = '<option value="">（未設定）</option>';
             tags.forEach(t => {
-              const chip = document.createElement("button");
-              chip.type = "button";
-              chip.className = "tag-chip";
-              chip.textContent = t.name_ja || t.id;
-              chip.title = `${t.id} (${cat.key})`;
-              if (ct[cat.key] === t.id) chip.classList.add("selected");
-              chip.addEventListener("click", () => {
-                const wasSelected = chip.classList.contains("selected");
-                section.querySelectorAll(".tag-chip").forEach(c => c.classList.remove("selected"));
-                if (!wasSelected) chip.classList.add("selected");
-              });
-              row.appendChild(chip);
+              const opt = document.createElement("option");
+              opt.value = t.id;
+              opt.textContent = t.name_ja || t.id;
+              if (t.id === currentVal) opt.selected = true;
+              sel.appendChild(opt);
             });
-            section.appendChild(row);
-            container.appendChild(section);
           });
         });
       }
@@ -3731,6 +3932,15 @@
                 </label>
               </div>
 
+              <div style="display:flex; align-items:center; gap:6px; margin-top:4px;">
+                <span style="font-size:10px; color:var(--text-muted); flex-shrink:0;">👤 紐づけキャラ:</span>
+                <select id="xfer-${escapeHtml(ck)}" class="select-ctrl" style="padding:2px 5px; font-size:10.5px; flex:1; min-width:0;">
+                  ${state.characters.map(c => `<option value="${escapeHtml(c.char_id)}" ${c.char_id === it.char_id ? 'selected' : ''}>${escapeHtml(c.display_name || c.char_id)}</option>`).join("")}
+                </select>
+                <button class="btn btn-sm" style="padding:2px 8px; font-size:10.5px; white-space:nowrap; flex-shrink:0;"
+                  onclick="transferVaultChar('${escapeHtml(it.char_id)}', '${escapeHtml(it.ppv_id)}', '${escapeHtml(ck)}')">⇄ 移管</button>
+              </div>
+
               <div class="vault-step-prices-row">
                 <div class="price-cell">
                   <span>① 階段レベル</span>
@@ -3755,9 +3965,28 @@
                 </div>
               </div>
 
-              <div class="form-group">
-                <label style="font-size:10.5px;">③ カテゴリ別マスタータグ（各 0〜1個 / 合計 1〜3個）</label>
-                <div id="vchips-${escapeHtml(ck)}" style="display:flex; flex-direction:column; gap:4px; margin-top:3px;"></div>
+              <div class="form-group" style="background:#100b1c; border:1px solid var(--border); border-radius:6px; padding:6px 8px;">
+                <label style="font-size:10.5px; color:#a78bfa; font-weight:700;">③ カテゴリ別マスタータグ <span style="font-size:9px; font-weight:400; color:var(--text-muted);">（ドロップダウンで選択 / 各 0〜1個）</span></label>
+                <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:5px; margin-top:4px;">
+                  <div>
+                    <span style="display:block; font-size:9.5px; color:var(--text-muted); margin-bottom:2px;">🎮 プレイ</span>
+                    <select id="vtag_play-${escapeHtml(ck)}" class="select-ctrl" style="padding:3px 5px; font-size:10.5px; width:100%;">
+                      <option value="">（未設定）</option>
+                    </select>
+                  </div>
+                  <div>
+                    <span style="display:block; font-size:9.5px; color:var(--text-muted); margin-bottom:2px;">👙 パーツ・衣装</span>
+                    <select id="vtag_body_outfit-${escapeHtml(ck)}" class="select-ctrl" style="padding:3px 5px; font-size:10.5px; width:100%;">
+                      <option value="">（未設定）</option>
+                    </select>
+                  </div>
+                  <div>
+                    <span style="display:block; font-size:9.5px; color:var(--text-muted); margin-bottom:2px;">📍 シチュエーション</span>
+                    <select id="vtag_situation-${escapeHtml(ck)}" class="select-ctrl" style="padding:3px 5px; font-size:10.5px; width:100%;">
+                      <option value="">（未設定）</option>
+                    </select>
+                  </div>
+                </div>
                 <label style="display:flex; align-items:center; gap:5px; font-size:10.5px; margin-top:5px; cursor:pointer;">
                   <input type="checkbox" id="vgeneral-${escapeHtml(ck)}" ${it.is_general ? 'checked' : ''}>
                   <span>🌟 汎用おすすめ（is_general）</span>
@@ -3806,20 +4035,14 @@
     }
 
     async function saveVaultCard(charId, ppvId, cardKey) {
-      const container = document.getElementById(`vchips-${cardKey}`);
+      // [Ticket 6.2] カテゴリ別タグはドロップダウンの選択値から取得
       const selectedTags = { play: [], body_outfit: [], situation: [] };
-      if (container) {
-        const sections = container.querySelectorAll(".cat-tag-section");
-        PPV_TAG_CATEGORIES.forEach((cat, i) => {
-          const section = sections[i];
-          if (!section) return;
-          const sel = section.querySelector(".tag-chip.selected");
-          if (sel) {
-            const m = sel.title.match(/^([^ (]+) \(/);
-            if (m) selectedTags[cat.key] = [m[1]];
-          }
-        });
-      }
+      PPV_TAG_CATEGORIES.forEach(cat => {
+        const sel = document.getElementById(`vtag_${cat.key}-${cardKey}`);
+        if (sel && sel.value) {
+          selectedTags[cat.key] = [sel.value];
+        }
+      });
       const isGeneral = document.getElementById(`vgeneral-${cardKey}`)?.checked ? 1 : 0;
       const payload = {
         char_id: charId,
@@ -3859,6 +4082,40 @@
       if (data.ok) {
         showToast(`🗑️ ${ppvId} を削除しました`);
         loadVaultList();
+      }
+    }
+
+    async function transferVaultChar(sourceCharId, ppvId, cardKey) {
+      const sel = document.getElementById(`xfer-${cardKey}`);
+      if (!sel) return;
+      const targetCharId = sel.value;
+      if (targetCharId === sourceCharId) {
+        showToast("⚠️ 現在のキャラクターのままです。移先キャラを選択してください。");
+        return;
+      }
+      const targetChar = state.characters.find(c => c.char_id === targetCharId);
+      const targetName = targetChar ? (targetChar.display_name || targetCharId) : targetCharId;
+      if (!confirm(`素材「${ppvId}」を ${targetName} へ移管しますか？\n（現在 ${sourceCharId} に紐づいています）`)) return;
+      try {
+        const res = await fetch("/api/vault/transfer_char", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            source_char_id: sourceCharId,
+            target_char_id: targetCharId,
+            ppv_id: ppvId,
+          }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          showToast(`✅ ${ppvId} を ${targetName} へ移管しました`);
+          loadVaultList();
+          loadUnmatchedNeeds();
+        } else {
+          showToast(`❌ 移管失敗: ${data.error || "不明なエラー"}`);
+        }
+      } catch (e) {
+        showToast(`❌ 移管エラー: ${e.message}`);
       }
     }
 

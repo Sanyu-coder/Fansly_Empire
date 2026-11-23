@@ -1600,6 +1600,17 @@ class SalesEngine:
         state_step_turns = int(psych_profile.get("_state_step_turns") or 0)
         # 前回 PPV が提案されていたか判定 (psych_profile に recommended_ppv_id が残存 = 前回 PPV あり)
         had_ppv_prev = bool(psych_profile.get("recommended_ppv_id"))
+
+        # [破綻3修正] Escalate_Stop 解除判定: 人間の介入解除 (is_escalated=0) を検出
+        is_escalated_cleared = False
+        if norm_input_stage == STATE_ESCALATE and fan_id:
+            try:
+                fan_rec_esc = get_fan_record(char_id, fan_id, db_path=db_path)
+                if fan_rec_esc and int(fan_rec_esc.get("is_escalated") or 0) == 0:
+                    is_escalated_cleared = True
+            except Exception:
+                pass
+
         new_state, recommended_ppv, state_meta = evaluate_state_transition(
             char_id=char_id,
             fan_id=fan_id,
@@ -1609,6 +1620,7 @@ class SalesEngine:
             consecutive_ppv_ignored=consecutive_ppv_ignored,
             state_step_turns=state_step_turns,
             had_ppv_in_previous_turn=had_ppv_prev,
+            is_escalated_cleared=is_escalated_cleared,
             db_path=db_path,
         )
         next_phase = new_state
@@ -1939,6 +1951,7 @@ def evaluate_state_transition(
     tag_collect_max_turns: int = 5,
     cooldown_turns_threshold: int = 3,
     had_ppv_in_previous_turn: bool = False,
+    is_escalated_cleared: bool = False,
     db_path: Optional[str] = None,
 ) -> Tuple[str, Optional[Dict[str, Any]], Dict[str, Any]]:
     """
@@ -1969,6 +1982,38 @@ def evaluate_state_transition(
         "next_transition_condition": "",
         "new_unmatched_needs": new_needs,
     }
+
+    # --- [破綻3修正] 例外ステートからの復帰経路 ---
+    # Escalate_Stop: 人間介入解除 (is_escalated_cleared=True) → 1_Collect_Tags 復帰
+    if current_state == STATE_ESCALATE:
+        if is_escalated_cleared:
+            meta["reason_ja"] = "Escalate_Stop 解除: 人間介入完了 → 1_Collect_Tags へ復帰 (state_step_turns=0)"
+            meta["next_transition_condition"] = "タグヒアリング再開 (state_step_turns=0)"
+            return STATE_COLLECT, None, meta
+        meta["reason_ja"] = "Escalate_Stop 滞在: 人間介入・確認待ち"
+        meta["next_transition_condition"] = "人間の介入・確認待ち"
+        return STATE_ESCALATE, None, meta
+
+    # Low_Priority: 購入発生 (ppv_transactions.is_unlocked=1) → 1_Collect_Tags 復帰
+    if current_state == STATE_LOW_PRIORITY:
+        purchased = False
+        if fan_id:
+            try:
+                from app.core.database import get_fan_ppv_transactions
+                txs = get_fan_ppv_transactions(char_id, fan_id, db_path=db_path)
+                for tx in txs:
+                    if int(tx.get("is_unlocked") or 0) == 1:
+                        purchased = True
+                        break
+            except Exception:
+                pass
+        if purchased:
+            meta["reason_ja"] = "Low_Priority 復帰: 購入発生検出 → 1_Collect_Tags へ復帰 (state_step_turns=0)"
+            meta["next_transition_condition"] = "タグヒアリング再開 (state_step_turns=0)"
+            return STATE_COLLECT, None, meta
+        meta["reason_ja"] = "Low_Priority 滞在: 省エネモード (相槌のみ)"
+        meta["next_transition_condition"] = "購入発生で 1_Collect_Tags 復帰"
+        return STATE_LOW_PRIORITY, None, meta
 
     # --- 危険ワード検知: 即座に Escalate_Stop ---
     # [バグ修正] 短く誤検知の多い語 (ai/bot/child/minor/underage) は単語境界マッチのみ使用。
@@ -2055,8 +2100,14 @@ def evaluate_state_transition(
 
     # --- 2_Pitch_PPV ---
     if current_state == STATE_PITCH:
+        # [破綻1修正] 購入意向検知 → 3_Cooldown へ遷移 (state_step_turns=0)
+        if has_buy_intent:
+            meta["reason_ja"] = "2_Pitch_PPV 滞在中に購入意向を検出 → 3_Cooldown へ遷移 (state_step_turns=0)"
+            meta["next_transition_condition"] = "タグヒアリング再開"
+            return STATE_COOLDOWN, None, meta
+
         if had_ppv_in_previous_turn:
-            # 前回 PPV 提案済み → ファンの反応待ち (購入で 3_Cooldown)
+            # 前回 PPV 提案済み → ファンの反応待ち
             meta["reason_ja"] = "2_Pitch_PPV 滞在: 提案済み、ファンの反応待ち"
             meta["next_transition_condition"] = "PPV提案送信成功 ➔ 3_Cooldown (state_step_turns=0)"
         else:
@@ -2071,6 +2122,19 @@ def evaluate_state_transition(
 
     # --- 3_Cooldown ---
     if current_state == STATE_COOLDOWN:
+        # [破綻2修正] 冷却中の購入意向救済: 機会損失を防ぐため早期復帰
+        if has_buy_intent:
+            ppv = match_ppv_deterministic(char_id, fan_id, matched_tags, ladder_step=1, is_rescue=False, db_path=db_path)
+            if ppv is None and matched_tags:
+                ppv = match_ppv_deterministic(char_id, fan_id, matched_tags, ladder_step=1, is_rescue=True, db_path=db_path)
+            if ppv:
+                meta["reason_ja"] = "3_Cooldown 中だが購入意向あり＆在庫一致 → 2_Pitch_PPV へ救済復帰 (state_step_turns=0)"
+                meta["next_transition_condition"] = "PPV提案送信成功後に 3_Cooldown"
+                return STATE_PITCH, ppv, meta
+            meta["reason_ja"] = "3_Cooldown 中だが購入意向あり → 1_Collect_Tags へ救済復帰 (state_step_turns=0)"
+            meta["next_transition_condition"] = "タグヒアリング再開 (state_step_turns=0)"
+            return STATE_COLLECT, None, meta
+
         if turns >= int(cooldown_turns_threshold or 3):
             meta["reason_ja"] = f"クールダウン {turns} 往復経過 (>= {cooldown_turns_threshold}) → 1_Collect_Tags へ復帰"
             meta["next_transition_condition"] = "タグヒアリング再開"

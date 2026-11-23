@@ -995,7 +995,7 @@ def api_simulator_reply():
     next_phase_out = str(result.get("sales_phase") or current_phase)
     rec_ppv = result.get("recommended_ppv")
     sent_ppv_attachment = None
-    if next_phase_out in ("2_Pitch_PPV",) and isinstance(rec_ppv, dict) and rec_ppv.get("ppv_id"):
+    if next_phase_out in ("2_Pitch_PPV", "3_Lead_Pitch", "4_Lock_Close", "4_Closing") and isinstance(rec_ppv, dict) and rec_ppv.get("ppv_id"):
         fname = os.path.basename(str(rec_ppv.get("filename") or "").replace("\\", "/").strip())
         vault_dir = get_char_paths(char_id)["vault_dir"]
         f_exists = bool(fname and os.path.isfile(os.path.join(vault_dir, fname)) and os.path.getsize(os.path.join(vault_dir, fname)) > 0)
