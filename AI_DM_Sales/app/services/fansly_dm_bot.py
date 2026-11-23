@@ -28,7 +28,7 @@ from app.core.database import (
     upsert_fan_sales_state,
 )
 from app.core.discord_notifier import send_discord_alert
-from app.core.llm_client import LLMClient, llm_client
+from app.core.llm_client import LLMClient, llm_client, execute_with_resilient_retry, LLMResilientRetryExhaustedError
 from app.services.character_loader import (
     ensure_character_files,
     is_character_sleeping,
@@ -938,7 +938,15 @@ class CharacterBotWorker:
                 already_recorded_fan_msg = True
 
         if not already_recorded_fan_msg:
-            fan_msg_ja = llm_client.translate_to_japanese(fan_message_en)
+            # [Ticket 2.2] 受信DMの日本語訳も不屈リトライで保護 (VRAM競合で失敗しても破棄しない)
+            try:
+                fan_msg_ja = execute_with_resilient_retry(
+                    lambda: llm_client.translate_to_japanese(fan_message_en),
+                    task_name=f"translate_fan_msg_{fan_id}",
+                    db_path=db_path,
+                )
+            except LLMResilientRetryExhaustedError:
+                fan_msg_ja = ""  # 復旧しない場合のみ空文字で進め受信処理を破棄しない
             saved_fan_msg = add_dm_message(
                 char_id=self.char_id,
                 fan_id=fan_id,
@@ -2798,11 +2806,35 @@ class CharacterBotWorker:
                             # 保留中だったAI返信カウントダウンをすべてキャンセル
                             self.cancel_pending_reply(fan_id)
                             # ファンのステートを機械的に 3_Cooldown へ更新
+                            # [Ticket 3.4] 往復カウントもリセット (state_step_turns=0)
                             upsert_fan_sales_state(
                                 char_id=self.char_id,
                                 fan_id=fan_id,
                                 sales_phase="3_Cooldown",
+                                state_step_turns=0,
                             )
+                            # [Ticket 3.4] 本番パイプラインの往復カウントは
+                            # psych_profile_json._state_step_turns で管理されているため、
+                            # ここでもリセットしてクールダウン後 1_Collect_Tags 復帰時
+                            # に天井救済が誤って早期発動するのを防ぐ
+                            try:
+                                from app.core.database import get_fan_record as _gfr
+                                _fan = _gfr(self.char_id, fan_id)
+                                if _fan:
+                                    _prof_raw = _fan.get("psych_profile_json") or "{}"
+                                    try:
+                                        _prof = json.loads(_prof_raw) if isinstance(_prof_raw, str) else dict(_prof_raw or {})
+                                    except Exception:
+                                        _prof = {}
+                                    if isinstance(_prof, dict) and _prof.get("_state_step_turns"):
+                                        _prof["_state_step_turns"] = 0
+                                        upsert_fan_sales_state(
+                                            char_id=self.char_id,
+                                            fan_id=fan_id,
+                                            psych_profile_dict=_prof,
+                                        )
+                            except Exception:
+                                pass
                             # 手動送信でPPV素材が添付されていた場合、オファー記録を反映し二重提案リストから除外
                             if ppv_item:
                                 record_ppv_offer(

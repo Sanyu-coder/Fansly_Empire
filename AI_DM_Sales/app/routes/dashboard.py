@@ -962,7 +962,7 @@ def api_simulator_reply():
         except Exception:
             explicit_stage_score = None
 
-    current_phase = str(data.get("sales_phase") or "1_Icebreak").strip()
+    current_phase = str(data.get("sales_phase") or "1_Collect_Tags").strip()
     raw_purchased = data.get("purchased_ppv_ids") or []
     if isinstance(raw_purchased, str):
         purchased_ids = [x.strip() for x in raw_purchased.split(",") if x.strip()]
@@ -995,7 +995,7 @@ def api_simulator_reply():
     next_phase_out = str(result.get("sales_phase") or current_phase)
     rec_ppv = result.get("recommended_ppv")
     sent_ppv_attachment = None
-    if next_phase_out in ("3_Lead_Pitch", "4_Lock_Close", "4_Closing") and isinstance(rec_ppv, dict) and rec_ppv.get("ppv_id"):
+    if next_phase_out in ("2_Pitch_PPV",) and isinstance(rec_ppv, dict) and rec_ppv.get("ppv_id"):
         fname = os.path.basename(str(rec_ppv.get("filename") or "").replace("\\", "/").strip())
         vault_dir = get_char_paths(char_id)["vault_dir"]
         f_exists = bool(fname and os.path.isfile(os.path.join(vault_dir, fname)) and os.path.getsize(os.path.join(vault_dir, fname)) > 0)
@@ -1063,6 +1063,7 @@ def api_simulator_reply():
             "prompt_version": result.get("prompt_version"),
             "playbook_version_id": result.get("playbook_version_id"),
             "recommended_ppv": rec_ppv,
+            "state_meta": result.get("state_meta"),
             "sent_ppv_attachment": sent_ppv_attachment,
             "tip_hook": result.get("tip_hook"),
             "tip_tx_id": result.get("tip_tx_id"),
@@ -1350,6 +1351,13 @@ def api_system_unmatched_needs_promote():
     if not _re.fullmatch(r"[a-z0-9_]{1,64}", keyword):
         return jsonify({"ok": False, "error": "keyword must match [a-z0-9_]{1,64}"}), 400
 
+    # [Ticket 6.3] 昇格先カテゴリ選択 (play / body_outfit / situation)。
+    # 未指定 or 不正値の場合は後方互換のため fan_wish へフォールバックする。
+    VALID_PROMOTE_CATEGORIES = ("play", "body_outfit", "situation")
+    target_category = str(data.get("category") or "").strip().lower()
+    if target_category not in VALID_PROMOTE_CATEGORIES:
+        target_category = "fan_wish"
+
     path = master_tags_path()
     try:
         with open(path, "r", encoding="utf-8") as f:
@@ -1358,22 +1366,28 @@ def api_system_unmatched_needs_promote():
         return jsonify({"ok": False, "error": f"cannot read master_tags.json: {e}"}), 500
 
     cats = tags_data.setdefault("categories", {})
-    fw = cats.setdefault("fan_wish", {"name_ja": "未登録ファン要望（自動検出・蓄積）", "tags": []})
-    existing_ids = {str(t.get("id") or "").strip() for t in (fw.get("tags") or [])}
+    cat_name_ja = {
+        "play": "プレイ・属性",
+        "body_outfit": "パーツ・衣装",
+        "situation": "シチュエーション",
+        "fan_wish": "未登録ファン要望（自動検出・蓄積）",
+    }
+    cat = cats.setdefault(target_category, {"name_ja": cat_name_ja.get(target_category, target_category), "tags": []})
+    existing_ids = {str(t.get("id") or "").strip() for t in (cat.get("tags") or [])}
     if keyword in existing_ids:
-        return jsonify({"ok": False, "error": f"tag id '{keyword}' already exists in fan_wish"}), 409
+        return jsonify({"ok": False, "error": f"tag id '{keyword}' already exists in {target_category}"}), 409
 
-    fw["tags"].append(
+    cat["tags"].append(
         {
             "id": keyword,
-            "category": "fan_wish",
+            "category": target_category,
             "name_ja": str(data.get("name_ja") or keyword).strip() or keyword,
             "llm_hint": str(data.get("llm_hint") or "").strip() or f"{keyword}, fan request, new content wish",
         }
     )
     # fan_wish カテゴリの既定タグ "fan_wish" がなければ追加 (LLM の出力先として必ず必要)
-    if "fan_wish" not in existing_ids:
-        fw["tags"].insert(
+    if target_category == "fan_wish" and "fan_wish" not in existing_ids:
+        cat["tags"].insert(
             0,
             {
                 "id": "fan_wish",
@@ -1391,12 +1405,17 @@ def api_system_unmatched_needs_promote():
 
     updated = mark_unmatched_need_promoted(keyword)
 
+    # load_master_tags の mtime キャッシュを破棄して次回読み込みで新規タグを反映する
+    from app.services.tag_matcher import load_master_tags
+    load_master_tags(refresh=True)
+
     return jsonify(
         {
             "ok": True,
             "promoted_rows": updated,
             "tag_id": keyword,
-            "message": f"キーワード '{keyword}' を master_tags.json の fan_wish カテゴリへ昇格しました",
+            "category": target_category,
+            "message": f"キーワード '{keyword}' を master_tags.json の {target_category} カテゴリへ昇格しました",
         }
     )
 

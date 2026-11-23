@@ -321,15 +321,27 @@ class SalesEngine:
 
     @classmethod
     def normalize_stage_name(cls, phase: Optional[str]) -> str:
-        """ステージ表記ゆれ (2_Discovery -> 2_Explore, 4_Closing -> 4_Lock_Close) を標準 S.E.L.L. ステージ名へ正規化する"""
-        p = (phase or "1_Icebreak").strip()
-        if p == "2_Discovery":
-            return "2_Explore"
-        if p == "4_Closing":
-            return "4_Lock_Close"
-        if p not in cls.PHASES:
-            return "1_Icebreak"
-        return p
+        """
+        ステート名を正規化する。
+        新ステートマシン名 (1_Collect_Tags / 2_Pitch_PPV / 3_Cooldown / Escalate_Stop / Low_Priority) はそのまま返す。
+        旧 S.E.L.L. ステージ名は新ステートへマッピングする。
+        """
+        p = (phase or "1_Collect_Tags").strip()
+        # 新ステートマシン名はそのまま通過
+        if p in ("1_Collect_Tags", "2_Pitch_PPV", "3_Cooldown", "Escalate_Stop", "Low_Priority"):
+            return p
+        # 旧 S.E.L.L. ステージ名 → 新ステートへマッピング
+        if p in ("1_Icebreak", "2_Discovery", "2_Explore"):
+            return "1_Collect_Tags"
+        if p in ("3_Lead_Pitch",):
+            return "2_Pitch_PPV"
+        if p in ("4_Lock_Close", "4_Closing"):
+            return "2_Pitch_PPV"
+        if p in ("5_Cooldown",):
+            return "3_Cooldown"
+        if p in ("6_Low_Priority",):
+            return "Low_Priority"
+        return "1_Collect_Tags"
 
     @classmethod
     def get_stage_thresholds(
@@ -1959,12 +1971,19 @@ def evaluate_state_transition(
     }
 
     # --- 危険ワード検知: 即座に Escalate_Stop ---
+    # [バグ修正] 短く誤検知の多い語 (ai/bot/child/minor/underage) は単語境界マッチのみ使用。
+    # 従来は部分文字列マッチで "again"/"available"/"hair" などが "ai" と誤マッチし、
+    # 無害メッセージで Escalate_Stop が発動する事故があった。
     msg_lower = (user_message or "").lower()
+    WORD_BOUNDARY_KEYWORDS = {"ai", "bot", "child", "minor", "underage", "fraud", "scam"}
     for kw in _cfg.DANGER_KEYWORDS:
         kw_clean = str(kw).strip().lower()
         if not kw_clean:
             continue
-        hit = (kw_clean in msg_lower) or (kw_clean in ("bot", "ai") and bool(re.search(rf"\b{re.escape(kw_clean)}\b", msg_lower)))
+        if kw_clean in WORD_BOUNDARY_KEYWORDS:
+            hit = bool(re.search(rf"\b{re.escape(kw_clean)}\b", msg_lower))
+        else:
+            hit = kw_clean in msg_lower
         if hit:
             meta["reason_ja"] = f"危険ワード検知 ('{kw_clean}') により自動返信停止"
             meta["next_transition_condition"] = "人間の介入・確認待ち"

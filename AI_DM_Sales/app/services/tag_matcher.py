@@ -178,7 +178,11 @@ def match_ppv_deterministic(
         if prev is None:
             tx_map[pid] = tx
         else:
-            if str(tx.get("offered_at") or "") >= str(prev.get("offered_at") or ""):
+            # [バグ修正] 文字列比較ではなく _parse_iso_datetime で正しく最新オファーを判定。
+            # 文字列比較は 'Z' 付き / タイムゾーン付き等のフォーマット違いで壊れる。
+            new_dt = _parse_iso_datetime(str(tx.get("offered_at") or ""))
+            prev_dt = _parse_iso_datetime(str(prev.get("offered_at") or ""))
+            if new_dt is not None and (prev_dt is None or new_dt >= prev_dt):
                 tx_map[pid] = tx
 
     def is_excluded(rec: Dict[str, Any]) -> bool:

@@ -1143,6 +1143,8 @@ def upsert_fan_sales_state(
     psych_profile_dict: Optional[Dict[str, Any]] = None,
     ab_group: Optional[str] = None,
     last_contact_at: Optional[str] = None,
+    state_step_turns: Optional[int] = None,
+    last_pitch_at: Optional[str] = None,
     db_path: Optional[str] = None,
 ) -> Dict[str, Any]:
     """fans テーブルの営業ステータス・フラグ・カルテを一括作成または更新する"""
@@ -1224,6 +1226,12 @@ def upsert_fan_sales_state(
             if ab_group is not None and str(ab_group).strip().upper() in ("A", "B"):
                 updates.append("ab_group = ?")
                 params.append(str(ab_group).strip().upper())
+            if state_step_turns is not None:
+                updates.append("state_step_turns = ?")
+                params.append(int(state_step_turns))
+            if last_pitch_at is not None:
+                updates.append("last_pitch_at = ?")
+                params.append(last_pitch_at)
 
             params.extend([char_id, fan_id])
             cur.execute(
@@ -2799,7 +2807,16 @@ def record_unmatched_need(
         )
         conn.commit()
         return cur.rowcount > 0
-    except Exception:
+    except Exception as _need_exc:
+        # [バグ修正] 例外を無言に握りつぶさずログ出力。
+        # DBロック・破損と「重複による False」を区別可能にする。
+        try:
+            import logging
+            logging.getLogger("AI_DM_Sales.Database").warning(
+                f"record_unmatched_need failed (char={char_id}, fan={fan_id}, kw={keyword}): {_need_exc}"
+            )
+        except Exception:
+            pass
         return False
     finally:
         conn.close()
@@ -2917,6 +2934,21 @@ def get_system_setting(setting_key: str, db_path: Optional[str] = None) -> Optio
         return str(row["setting_value"] or "")
     except Exception:
         return None
+    finally:
+        conn.close()
+
+
+def get_system_settings(db_path: Optional[str] = None) -> Dict[str, str]:
+    """system_settings テーブルの全キー・値を辞書で返す。"""
+    try:
+        conn = get_db_connection(db_path)
+    except Exception:
+        return {}
+    try:
+        rows = conn.execute("SELECT setting_key, setting_value FROM system_settings;").fetchall()
+        return {str(r["setting_key"]): str(r["setting_value"] or "") for r in rows}
+    except Exception:
+        return {}
     finally:
         conn.close()
 

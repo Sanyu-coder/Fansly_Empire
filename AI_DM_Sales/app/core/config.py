@@ -30,7 +30,7 @@ DANGER_KEYWORDS = [
     "minor",
     "child",
     "bot",
-    "ai ",
+    "ai",
     "artificial intelligence",
 ]
 

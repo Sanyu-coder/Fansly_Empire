@@ -523,7 +523,7 @@ flowchart TD
 
 ---
 
-#### Ticket 5.3: システム設定・Discord設定APIの実装
+#### Ticket 5.3: システム設定・Discord設定APIの実装 [x] 完了
 - **対象ファイル**: 
   1. `C:\Fansly_Empire\AI_DM_Sales\app\routes\vault_routes.py`
   2. `C:\Fansly_Empire\AI_DM_Sales\app\routes\dashboard.py`
@@ -577,7 +577,7 @@ flowchart TD
 
 ---
 
-#### Ticket 6.2: タブ2（PPV武器庫）の改修（カテゴリ別タグチップUI ＋ 汎用チェックボックス）
+#### Ticket 6.2: タブ2（PPV武器庫）の改修（カテゴリ別タグチップUI ＋ 汎用チェックボックス） `[x] 完了`
 - **対象ファイル**: `C:\Fansly_Empire\AI_DM_Sales\app\templates\index.html`（※局所編集ルール厳守: `addPpvModal` / `editPpvModal` および関連JSのみ編集）
 - **具体的な実装内容**:
   1. PPV追加・編集モーダルの改修:
@@ -591,7 +591,7 @@ flowchart TD
 
 ---
 
-#### Ticket 6.3: タブ2（PPV武器庫）への「未登録ニーズ（NEEDランキング）」UI追加
+#### Ticket 6.3: タブ2（PPV武器庫）への「未登録ニーズ（NEEDランキング）」UI追加 `[x] 完了`
 - **対象ファイル**: `C:\Fansly_Empire\AI_DM_Sales\app\templates\index.html`（※局所編集ルール厳守: タブ2内部およびNEED操作JSのみ編集）
 - **具体的な実装内容**:
   1. タブ2のサイドまたは下部に「📊 ファン未登録ニーズ（NEEDリスト）」セクションを設置。
@@ -602,7 +602,7 @@ flowchart TD
 
 ---
 
-#### Ticket 6.4: タブ1（モニタリング）の改修（新ステートマシン可視化UI）
+#### Ticket 6.4: タブ1（モニタリング）の改修（新ステートマシン可視化UI） `[x] 完了`
 - **対象ファイル**: `C:\Fansly_Empire\AI_DM_Sales\app\templates\index.html`（※局所編集ルール厳守: タブ1のスレッド詳細描画関数のみ編集）
 - **具体的な実装内容**:
   1. 顧客選択時の右側パネルヘッダーに「現在ステート」バッジを表示:
@@ -622,7 +622,7 @@ flowchart TD
 
 ---
 
-#### Ticket 6.5: 不要UIコンポーネントの非表示化・整理
+#### Ticket 6.5: 不要UIコンポーネントの非表示化・整理 `[x] 完了`
 - **対象ファイル**: `C:\Fansly_Empire\AI_DM_Sales\app\templates\index.html`（※局所編集ルール厳守）
 - **具体的な実装内容**:
   1. 以下のブラックボックス・凍結機能を画面から非表示化（`display:none` または削除）:
@@ -637,7 +637,7 @@ flowchart TD
 
 ### Phase 7: 統合テスト・シミュレーター検証
 
-#### Ticket 7.1: リファクタリング後パイプラインの単体・統合テスト
+#### Ticket 7.1: リファクタリング後パイプラインの単体・統合テスト `[x] 完了`
 - **対象ファイル**: `C:\Fansly_Empire\AI_DM_Sales\tests\test_refactored_pipeline.py`（新規作成）
 - **具体的な実装内容**:
   1. テスト項目を網羅するスクリプトを作成:
@@ -649,10 +649,16 @@ flowchart TD
      - テスト6: 不屈のリトライと優先度キュー
 - **完了条件**:
   - `python -m unittest tests/test_refactored_pipeline.py` を実行し、全テストケースが PASS すること。
+- **追記（テスト時のコードレビューで発見したバグ修正・2026-11-23）**:
+  1. `sales_engine.py` 危険ワード検知の誤検知修正: 短い語 (`ai`/`bot`/`child`/`minor`/`underage`/`fraud`/`scam`) は単語境界マッチのみに変更。従来は部分文字列マッチで "again"/"available"/"hair" が `ai` と誤マッチし無害メッセージで `Escalate_Stop` が発動する事故があった。`config.py` の `"ai "` 末尾スペースも除去。
+  2. `database.py` `upsert_fan_sales_state()` に `state_step_turns` / `last_pitch_at` パラメータを追加。`fansly_dm_bot.py` の `human_manual` 送信成功時に `state_step_turns=0` を渡し、`psych_profile_json._state_step_turns` もリセット（Ticket 3.4 仕様の未実装分を補完）。
+  3. `database.py` `record_unmatched_need()` の例外をログ出力（無言の握りつぶし修正）。
+  4. `fansly_dm_bot.py` 受信DMの日本語訳を `execute_with_resilient_retry()` で保護（Ticket 2.2 の実運用組み込み対象に追記）。
+  5. `tag_matcher.py` `match_ppv_deterministic()` の最新オファー判定を文字列比較から `_parse_iso_datetime()` 比較へ修正。
 
 ---
 
-#### Ticket 7.2: タブ4（営業シミュレーター）での総合動作確認
+#### Ticket 7.2: タブ4（営業シミュレーター）での総合動作確認 `[x] 完了`
 - **対象ファイル**: `C:\Fansly_Empire\AI_DM_Sales\app\templates\index.html`
 - **具体的な実装内容**:
   1. 営業シミュレータータブにおいて、模擬ファン発言を送信した際の動作を確認:

@@ -33,5 +33,12 @@
   },
   "stage_threshold_icebreak": 40,
   "stage_threshold_explore": 70,
-  "stage_threshold_lead_pitch": 85
+  "stage_threshold_lead_pitch": 85,
+  "discord_webhook_url": "",
+  "debounce_seconds": "18",
+  "tag_collect_target_count": "1",
+  "tag_collect_max_turns": "5",
+  "cooldown_turns_threshold": "3",
+  "dm_ollama_base_url": "",
+  "dm_ollama_model_name": ""
 }

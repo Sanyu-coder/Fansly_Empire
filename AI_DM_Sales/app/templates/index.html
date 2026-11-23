@@ -537,6 +537,45 @@
     }
     .vault-card:hover { border-color: var(--border-light); }
     .vault-card.inactive { opacity: 0.55; }
+    .tag-chip {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 4px 9px; border-radius: 999px; font-size: 11px; font-weight: 700;
+      background: #1a1525; color: #c4b5fd; border: 1px solid #4c1d95;
+      cursor: pointer; user-select: none; transition: all 0.12s ease;
+    }
+    .tag-chip:hover { background: #2a1f3d; border-color: #7c3aed; }
+    .tag-chip.selected {
+      background: #7c3aed; color: #fff; border-color: #a78bfa;
+      box-shadow: 0 0 8px rgba(124, 58, 237, 0.55);
+    }
+    .tag-chip:disabled { opacity: 0.45; cursor: not-allowed; }
+    .cat-tag-section {
+      display: flex; flex-direction: column; gap: 5px;
+      background: #100b1c; border: 1px solid var(--border);
+      border-radius: 8px; padding: 7px 9px;
+    }
+    .cat-tag-section .cat-label {
+      font-size: 10.5px; font-weight: 800; color: #a78bfa;
+      letter-spacing: 0.5px; display: flex; align-items: center; gap: 5px;
+    }
+    .cat-tag-section .chip-row {
+      display: flex; flex-wrap: wrap; gap: 5px;
+    }
+    .vault-tag-badge {
+      display: inline-flex; align-items: center;
+      padding: 2px 7px; border-radius: 999px;
+      font-size: 9.5px; font-weight: 700; line-height: 1.4;
+      border: 1px solid;
+    }
+    .vault-tag-badge.cat-play { background: rgba(124, 58, 237, 0.14); color: #c4b5fd; border-color: #7c3aed; }
+    .vault-tag-badge.cat-body_outfit { background: rgba(236, 72, 153, 0.14); color: #f9a8d4; border-color: #db2777; }
+    .vault-tag-badge.cat-situation { background: rgba(34, 197, 94, 0.14); color: #86efac; border-color: #16a34a; }
+    .vault-general-badge {
+      display: inline-flex; align-items: center;
+      padding: 2px 8px; border-radius: 999px;
+      font-size: 10px; font-weight: 800; line-height: 1.4;
+      background: rgba(250, 204, 21, 0.16); color: #fde047; border: 1px solid #ca8a04;
+    }
     .vault-thumb-wrap {
       position: relative;
       width: 100%;
@@ -859,6 +898,48 @@
       color: #fde68a;
       border-color: rgba(245, 158, 11, 0.45);
     }
+    /* [Ticket 6.4] 新ステートマシンバッジ */
+    .badge-state-collect {
+      background: rgba(56, 189, 248, 0.18);
+      color: #7dd3fc;
+      border-color: rgba(56, 189, 248, 0.45);
+    }
+    .badge-state-pitch {
+      background: rgba(236, 72, 153, 0.2);
+      color: #f9a8d4;
+      border-color: rgba(236, 72, 153, 0.5);
+    }
+    .badge-state-cooldown {
+      background: rgba(168, 85, 247, 0.22);
+      color: #d8b4fe;
+      border-color: rgba(168, 85, 247, 0.5);
+    }
+    .badge-state-escalate {
+      background: rgba(239, 68, 68, 0.28);
+      color: #fca5a5;
+      border-color: #ef4444;
+      animation: pulseOverdue 1.8s infinite ease-in-out;
+    }
+    .badge-state-low {
+      background: rgba(100, 116, 139, 0.22);
+      color: #cbd5e1;
+      border-color: rgba(100, 116, 139, 0.5);
+    }
+    .state-machine-banner {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      padding: 9px 11px;
+      border-radius: 9px;
+      border: 1px solid var(--border);
+      background: rgba(30, 27, 55, 0.65);
+      margin-bottom: 10px;
+    }
+    .state-machine-banner .state-next-row {
+      font-size: 11.5px;
+      color: #94a3b8;
+    }
+    .state-machine-banner .state-next-row strong { color: #7dd3fc; }
     .thread-card.overdue-card {
       border-color: rgba(239, 68, 68, 0.75);
       background: rgba(127, 29, 29, 0.22);
@@ -1516,6 +1597,20 @@
       </div>
 
       <div id="vaultGridContainer" class="vault-grid"></div>
+
+      <!-- [Ticket 6.3] 未登録ニーズ（NEEDランキング） -->
+      <div id="unmatchedNeedsSection" style="margin-top:18px; border-top:1px solid var(--border); padding-top:14px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+          <h3 style="font-size:13px; color:#f0abfc; margin:0;">📊 ファン未登録ニーズ（NEEDランキング）</h3>
+          <button class="btn btn-sm" onclick="loadUnmatchedNeeds()">↻ 再読込</button>
+        </div>
+        <div style="font-size:11px; color:var(--text-muted); margin-bottom:8px;">
+          耳役LLMが抽出したマスタータグに未登録のファン要望キーワード。昇格すると <code>master_tags.json</code> に追加され、PPV編集チップに即時反映されます。
+        </div>
+        <div id="unmatchedNeedsTableContainer" style="overflow-x:auto;">
+          <div style="text-align:center; padding:24px; color:var(--text-muted); font-size:12px;">読み込み中...</div>
+        </div>
+      </div>
     </section>
 
     <!-- タブ3：キャラ・プラン設定 -->
@@ -1563,8 +1658,8 @@
             <textarea id="personaForbiddenTopics" class="textarea-ctrl" rows="3"></textarea>
           </div>
 
-          <!-- Phase 2: 休眠ファン掘り起こし個別DMバッチ -->
-          <div class="profile-section" style="margin-top:8px; border-color:rgba(236,72,153,0.4); background:rgba(27,22,48,0.85);">
+          <!-- Phase 2: 休眠ファン掘り起こし個別DMバッチ [Ticket 6.5: 機能凍結のため非表示化] -->
+          <div class="profile-section" style="display:none; margin-top:8px; border-color:rgba(236,72,153,0.4); background:rgba(27,22,48,0.85);">
             <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
               <h4 style="color:#f9a8d4; margin:0; font-size:12.5px;">
                 💌 休眠課金ファン掘り起こし (Dormant Revival)
@@ -1595,8 +1690,8 @@
         </div>
 
         <div class="scroll-panel">
-          <!-- Phase 2: 自己進化営業ルール & A/Bテスト自動昇格エンジン -->
-          <div class="profile-section" style="border-color:rgba(168,85,247,0.45); background:rgba(27,22,48,0.88);">
+          <!-- Phase 2: 自己進化営業ルール & A/Bテスト自動昇格エンジン [Ticket 6.5: A/Bテスト・チップ誘導機能凍結のため非表示化] -->
+          <div class="profile-section" style="display:none; border-color:rgba(168,85,247,0.45); background:rgba(27,22,48,0.88);">
             <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
               <h4 style="color:#d8b4fe; margin:0; font-size:12.5px;">
                 🧬 自己進化営業ルール ＆ A/Bテスト状況 (sales_playbooks)
@@ -1656,18 +1751,15 @@
               <input type="number" step="1" min="0" id="simIgnoredCount" class="input-ctrl" value="0">
             </div>
             <div class="form-group">
-              <label>現在営業フェーズ</label>
+              <label>現在ステート（新ステートマシン）</label>
               <select id="simSalesPhase" class="select-ctrl" onchange="simStageScore = null;">
-                <option value="1_Icebreak">1_Icebreak (雑談・関係構築)</option>
-                <option value="2_Discovery">2_Discovery (好み深掘り)</option>
-                <option value="2_Explore">2_Explore (互換)</option>
-                <option value="3_Lead_Pitch">3_Lead_Pitch (匂わせ・提案)</option>
-                <option value="4_Lock_Close">4_Lock_Close (クロージング)</option>
-                <option value="5_Cooldown">5_Cooldown (余韻・雑談)</option>
-                <option value="6_Low_Priority">6_Low_Priority (省エネ)</option>
+                <option value="1_Collect_Tags">1_Collect_Tags (嗜好ヒアリング)</option>
+                <option value="2_Pitch_PPV">2_Pitch_PPV (PPV提案)</option>
+                <option value="3_Cooldown">3_Cooldown (余韻・冷却)</option>
               </select>
             </div>
-            <div class="form-group">
+            <!-- [Ticket 6.5] 適用プレイブック群(A/B)セレクターは機能凍結のため非表示化 -->
+            <div class="form-group" style="display:none;">
               <label>適用プレイブック群</label>
               <select id="simAbGroup" class="select-ctrl">
                 <option value="A">Group A (本番)</option>
@@ -1678,7 +1770,7 @@
 
           <div id="simChatHistoryBox" class="chat-messages-box" style="background:var(--bg-input); border:1px solid var(--border); border-radius:8px; min-height:240px;">
             <div style="color:var(--text-muted); font-size:12px; text-align:center; margin-top:40px;">
-              テスト顧客として英語または日本語でメッセージを送信し、S.E.L.L.フェーズ遷移と動的プライシングを検証できます。
+              テスト顧客として英語または日本語でメッセージを送信し、ステートマシン遷移と動的プライシングを検証できます。
             </div>
           </div>
 
@@ -1719,7 +1811,7 @@
   <div id="addPpvModal" class="modal-backdrop">
     <div class="modal-card">
       <div class="modal-header">
-        <span>💎 新規PPV素材追加（ドラッグ＆ドロップ ＆ AI自動ドラフト生成）</span>
+        <span>💎 新規PPV素材追加（カテゴリ別タグチップ ＆ 汎用おすすめ設定）</span>
         <button class="btn btn-sm" onclick="closeAddPpvModal()">✕ 閉じる</button>
       </div>
       <div class="modal-body">
@@ -1730,7 +1822,7 @@
             動画または画像ファイルをここにドラッグ＆ドロップ（またはクリックして選択）
           </div>
           <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">
-            ファイル選択と同時に、初期価格マスターとAI推奨タグ・英語誘い文句が自動入力されます
+            ファイル選択と同時に、初期価格マスターが自動入力されます。タグは下方のチップから手動選択してください。
           </div>
         </div>
 
@@ -1772,16 +1864,18 @@
         </div>
 
         <div class="form-group">
-          <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
-            <label>推奨属性タグ (日本語・カンマ区切り / ローカルVision自動生成)</label>
-            <div style="display:flex; align-items:center; gap:6px;">
-              <span id="modalVisionStatusBadge" style="font-size:10.5px; color:#7dd3fc;"></span>
-              <button type="button" id="btnModalVisionGen" class="btn btn-sm btn-primary" onclick="runModalVisionAutoGenerate()">
-                ✨ AIでタグ・メモを自動生成
-              </button>
-            </div>
+          <label>カテゴリ別マスタータグ（各カテゴリ 0〜1個 / 合計 1〜3個）</label>
+          <div id="modalCategoryTagChips" style="display:flex; flex-direction:column; gap:8px; margin-top:4px;">
+            <div style="font-size:11px; color:var(--text-muted);">読み込み中...</div>
           </div>
-          <input type="text" id="modalPpvTags" class="input-ctrl" placeholder="ランジェリー, 黒レース, 寝室, 自撮り, 甘え">
+        </div>
+
+        <div class="form-group">
+          <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+            <input type="checkbox" id="modalPpvIsGeneral">
+            <span>🌟 汎用おすすめ（<code style="font-size:10px; background:#1a1525; padding:1px 4px; border-radius:3px; color:#c4b5fd;">is_general</code>）素材として登録</span>
+          </label>
+          <div style="font-size:10.5px; color:var(--text-muted); margin-top:2px;">タグ収集が天井往復数に達した際に、この素材を救済PPVとして提案する</div>
         </div>
 
         <div class="form-group">
@@ -1799,6 +1893,53 @@
       <div class="modal-footer">
         <button class="btn" onclick="closeAddPpvModal()">キャンセル</button>
         <button class="btn btn-primary" onclick="submitUploadPpv()">＋ PPV武器庫へ登録</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- [Ticket 6.3] NEED昇格モーダル -->
+  <div id="promoteNeedModal" class="modal-backdrop">
+    <div class="modal-card" style="max-width:480px;">
+      <div class="modal-header">
+        <span>📊 未登録ニーズ → マスタータグ昇格</span>
+        <button class="btn btn-sm" onclick="closePromoteNeedModal()">✕ 閉じる</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>タグID（キーワード）</label>
+          <input type="text" id="promoteNeedKeyword" class="input-ctrl" readonly style="background:#1a1525; color:#c4b5fd; font-weight:700;">
+        </div>
+        <div class="form-group">
+          <label>昇格先カテゴリ（PPV編集チップに反映されるカテゴリを選択）</label>
+          <div style="display:flex; gap:6px; flex-wrap:wrap;">
+            <label style="display:flex; align-items:center; gap:4px; font-size:12px; cursor:pointer; background:#1a1525; padding:5px 10px; border-radius:6px; border:1px solid var(--border);">
+              <input type="radio" name="promoteNeedCategory" value="play" checked> 🎮 プレイ・属性
+            </label>
+            <label style="display:flex; align-items:center; gap:4px; font-size:12px; cursor:pointer; background:#1a1525; padding:5px 10px; border-radius:6px; border:1px solid var(--border);">
+              <input type="radio" name="promoteNeedCategory" value="body_outfit"> 👗 パーツ・衣装
+            </label>
+            <label style="display:flex; align-items:center; gap:4px; font-size:12px; cursor:pointer; background:#1a1525; padding:5px 10px; border-radius:6px; border:1px solid var(--border);">
+              <input type="radio" name="promoteNeedCategory" value="situation"> 🌆 シチュエーション
+            </label>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>日本語表示名 (name_ja)（任意）</label>
+          <input type="text" id="promoteNeedNameJa" class="input-ctrl" placeholder="例: ローズワイン / 車内 / 朝のシャワー">
+        </div>
+        <div class="form-group">
+          <label>LLM分類ヒント (llm_hint)（任意、カンマ区切り英語キーワード）</label>
+          <input type="text" id="promoteNeedLlmHint" class="input-ctrl" placeholder="例: rose wine, wine, drinking">
+        </div>
+        <div id="promoteNeedStatus" style="font-size:12px; font-weight:700; min-height:20px;"></div>
+        <div style="font-size:10.5px; color:var(--text-muted); margin-top:6px;">
+          昇格すると <code style="font-size:10px; background:#1a1525; padding:1px 4px; border-radius:3px;">master_tags.json</code> の選択カテゴリに追加され、
+          即座にPPV編集モーダルのタグチップに反映されます。
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="closePromoteNeedModal()">キャンセル</button>
+        <button class="btn btn-primary" onclick="submitPromoteNeed()">🚀 昇格して登録</button>
       </div>
     </div>
   </div>
@@ -1881,7 +2022,8 @@
           <div id="replyDelayCharScaleHint" style="font-size:10.5px; color:#a5f3fc; margin-top:2px;"></div>
         </div>
 
-        <div class="profile-section" style="border-color:rgba(236,72,153,0.45);">
+        <!-- 旧S.E.L.L. ポイント閾値設定（新ステートマシン移行により非表示化） -->
+        <div class="profile-section" style="border-color:rgba(236,72,153,0.45); display:none;">
           <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; border-bottom:1px solid var(--border); padding-bottom:4px; margin-bottom:2px;">
             <h4 style="border-bottom:none; padding-bottom:0; margin-bottom:0; color:#f9a8d4;">
               🚀 S.E.L.L. 営業ステージ突破閾値設定 (stage_thresholds / 10〜100 pt)
@@ -1911,6 +2053,63 @@
             💡 現在設定: 1_Icebreak (40pt) ➔ 2_Explore (70pt) ➔ 3_Lead_Pitch (85pt) ➔ 4_Lock_Close
           </div>
           <div id="stageThresholdValidationError" class="validation-error-banner"></div>
+        </div>
+
+        <div class="profile-section" style="border-color:rgba(56,189,248,0.45);">
+          <h4 style="color:#7dd3fc;">🔔 Discord 通知設定</h4>
+          <div style="font-size:11px; color:var(--text-muted); line-height:1.45; margin-bottom:6px;">
+            営業イベント（PPV提案・購入成功・エスカレーション等）をDiscordへ通知します。
+          </div>
+          <div class="form-group">
+            <label>Discord Webhook URL</label>
+            <input type="text" id="setDiscordWebhookUrl" class="input-ctrl" placeholder="https://discord.com/api/webhooks/..." style="font-family:monospace; font-size:11px;">
+          </div>
+          <div style="display:flex; gap:8px; margin-top:4px;">
+            <button type="button" class="btn btn-sm" onclick="testDiscordWebhook()">🔔 テスト通知を送信</button>
+            <span id="discordTestResult" style="font-size:11px; align-self:center; color:var(--text-muted);"></span>
+          </div>
+        </div>
+
+        <div class="profile-section" style="border-color:rgba(251,191,36,0.45);">
+          <h4 style="color:#fcd34d;">⏱️ 受信デバウンス &amp; ステートマシン設定</h4>
+          <div style="font-size:11px; color:var(--text-muted); line-height:1.45; margin-bottom:6px;">
+            顧客メッセージ受信時のデバウンス待機時間と、1_Collect_Tags / 2_Pitch_PPV / 3_Cooldown ステートマシンの制御パラメータ。
+          </div>
+          <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px;">
+            <div class="form-group">
+              <label>受信デバウンス待機時間（秒）</label>
+              <input type="number" min="1" max="300" step="1" id="setDebounceSeconds" class="input-ctrl" value="18">
+            </div>
+            <div class="form-group">
+              <label>目標タグ収集数（1〜2個）</label>
+              <input type="number" min="1" max="2" step="1" id="setTagCollectTargetCount" class="input-ctrl" value="2">
+            </div>
+            <div class="form-group">
+              <label>天井往復数（1_Collect_Tags → 2_Pitch_PPV）</label>
+              <input type="number" min="1" max="50" step="1" id="setTagCollectMaxTurns" class="input-ctrl" value="5">
+            </div>
+          </div>
+          <div class="form-group" style="margin-top:6px;">
+            <label>クールダウン往復数（3_Cooldown → 復帰）</label>
+            <input type="number" min="1" max="50" step="1" id="setCooldownTurnsThreshold" class="input-ctrl" value="3">
+          </div>
+        </div>
+
+        <div class="profile-section" style="border-color:rgba(192,132,252,0.45);">
+          <h4 style="color:#d8b4fe;">🧠 DM推論用 Ollama 個別設定（将来の2枚目GPU用）</h4>
+          <div style="font-size:11px; color:var(--text-muted); line-height:1.45; margin-bottom:6px;">
+            DM返信推論に限り、メインOllamaとは別インスタンスを指定できます（未設定時はメインOllamaを使用）。
+          </div>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+            <div class="form-group">
+              <label>Ollama URL（例: http://localhost:11435）</label>
+              <input type="text" id="setDmOllamaBaseUrl" class="input-ctrl" placeholder="http://localhost:11435" style="font-family:monospace; font-size:11px;">
+            </div>
+            <div class="form-group">
+              <label>モデル名（例: llama3.1:8b）</label>
+              <input type="text" id="setDmOllamaModelName" class="input-ctrl" placeholder="llama3.1:8b" style="font-family:monospace; font-size:11px;">
+            </div>
+          </div>
         </div>
 
         <div class="profile-section">
@@ -1943,7 +2142,8 @@
           </div>
         </div>
 
-        <div class="profile-section" style="border-color:rgba(168,85,247,0.4);">
+        <!-- [Ticket 6.5] 自己進化A/Bテスト・休眠掘り起こしクイックステータスは機能凍結のため非表示化。詳細パネル遷移ボタンのみ維持 -->
+        <div class="profile-section" style="display:none; border-color:rgba(168,85,247,0.4);">
           <h4>🧬 自己進化A/Bテスト ＆ 休眠掘り起こしクイックステータス</h4>
           <div id="modalEvoQuickSummary" style="font-size:11.5px; color:#e2e8f0; line-height:1.5;">
             ステータス取得中...
@@ -1951,6 +2151,10 @@
           <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:6px;">
             <button class="btn btn-sm btn-primary" onclick="triggerPlaybookOptimization(true)">🧠 A/B比較分析を即時実行</button>
             <button class="btn btn-sm btn-success" onclick="triggerDormantRevival(true)">💌 休眠掘り起こしDM即時実行</button>
+          </div>
+        </div>
+        <div class="profile-section" style="border-color:rgba(168,85,247,0.4);">
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
             <button class="btn btn-sm" onclick="closeSettingsModal(); switchTab('tab-persona');">🎭 詳細パネルを開く (タブ3)</button>
           </div>
         </div>
@@ -2064,6 +2268,7 @@
       selectedPpvFile: null,
       selectedPpvObjectUrl: null,
       selectedPpvFilename: "secret_bedroom_clip.mp4",
+      masterTags: null,
       manualRawMarkdown: "",
       stageThresholds: { "1_Icebreak": 40, "2_Explore": 70, "3_Lead_Pitch": 85 },
       isPollingInFlight: false,
@@ -2100,7 +2305,7 @@
         p.classList.toggle("active", p.id === tabId);
       });
       if (tabId === "tab-monitoring") refreshMonitoring();
-      if (tabId === "tab-vault") loadVaultList();
+      if (tabId === "tab-vault") { loadVaultList(); loadUnmatchedNeeds(); }
       if (tabId === "tab-persona") loadCharacterConfigForTab();
     }
 
@@ -2787,13 +2992,8 @@
         : sr.stage_threshold;
 
       let stageGaugeHtml = "";
-      const hasValidStageGauge = (
-        rawStageScore !== undefined && rawStageScore !== null && rawStageScore !== "" &&
-        rawStageThreshold !== undefined && rawStageThreshold !== null && rawStageThreshold !== "" &&
-        Number.isFinite(Number(rawStageScore)) &&
-        Number.isFinite(Number(rawStageThreshold)) &&
-        Number(rawStageThreshold) > 0
-      );
+      /* [Ticket 6.5] S.E.L.L. スコア進行度バー（40/70/85pt）は廃止機能のため非表示化（常に空） */
+      const hasValidStageGauge = false;
 
       if (hasValidStageGauge) {
         const currentStage = String(latest.current_stage || sr.current_stage || "-");
@@ -2848,9 +3048,8 @@
           const p = (dl && typeof dl.profile_reasoning === "object") ? dl.profile_reasoning : {};
           const hSc = (dl && dl.stage_score !== undefined && dl.stage_score !== null) ? dl.stage_score : s.stage_score;
           const hTh = (dl && dl.stage_threshold !== undefined && dl.stage_threshold !== null) ? dl.stage_threshold : s.stage_threshold;
-          const hPtLabel = (hSc !== undefined && hSc !== null && hTh !== undefined && hTh !== null && Number(hTh) > 0)
-            ? ` (${Math.round(Number(hSc))}/${Math.round(Number(hTh))}pt)`
-            : "";
+          /* [Ticket 6.5] S.E.L.L. スコア(pt)表示は廃止機能のため非表示化 */
+          const hPtLabel = "";
           return `<div style="border-top:1px dashed var(--border); padding-top:4px; margin-top:4px; font-size:10px;">
             <div style="color:#a78bfa;">[${escapeHtml((dl.recorded_at || '').replace('T', ' '))}] ${escapeHtml(s.phase_transition || '-')}${escapeHtml(hPtLabel)}</div>
             <div>発言: "${escapeHtml((dl.fan_message_en || p.trigger_fan_message || '').slice(0, 80))}"</div>
@@ -2867,7 +3066,7 @@
         ${stageGaugeHtml}
         <div style="font-size:10px; color:var(--text-muted); display:flex; justify-content:space-between;">
           <span>最新記録: ${escapeHtml((latest.recorded_at || '').replace('T', ' '))}</span>
-          <span class="badge badge-char">${escapeHtml(ab.prompt_version || ('Group ' + (ab.ab_group || 'A')))}</span>
+          <!-- [Ticket 6.5] A/Bグループバッジは機能凍結のため非表示化 -->
         </div>
         <div class="decision-box-sub">
           <strong style="color:#d8b4fe; font-size:11px;">① 顧客カルテ更新根拠</strong>
@@ -2881,9 +3080,9 @@
           <strong style="color:#7dd3fc; font-size:11px;">② 営業戦略の検討過程</strong>
           <div><span style="color:#94a3b8;">フェーズ遷移:</span> <strong>${escapeHtml(sr.phase_transition || '-')}</strong></div>
           <div><span style="color:#94a3b8;">ステップ判定理由:</span> ${escapeHtml(sr.phase_reason_ja || '-')}</div>
-          <div><span style="color:#94a3b8;">適用A/Bルール:</span> Group ${escapeHtml(ab.ab_group || 'A')} (${escapeHtml(ab.prompt_version || 'v1-A')})</div>
+          <!-- [Ticket 6.5] 適用A/Bルール行は機能凍結のため非表示化 -->
           <div><span style="color:#94a3b8;">PPV/価格選定:</span> ${escapeHtml(sr.ladder_step_reason_ja || '-')}</div>
-          <div><span style="color:#94a3b8;">チップ/提案判定:</span> ${escapeHtml(sr.monetization_judgment_ja || '-')}</div>
+          <div><span style="color:#94a3b8;">提案判定:</span> ${escapeHtml(sr.monetization_judgment_ja || '-')}</div>
           ${sr.reply_delay_reasoning && sr.reply_delay_reasoning.summary_ja ? `<div><span style="color:#94a3b8;">待機秒数算出:</span> <span style="color:#7dd3fc;">${escapeHtml(sr.reply_delay_reasoning.summary_ja)}</span></div>` : ''}
           <div><span style="color:#94a3b8;">返信意図サマリ:</span> <span style="color:#f8fafc;">${escapeHtml(sr.reply_intent_summary_ja || '-')}</span></div>
         </div>
@@ -2898,6 +3097,41 @@
       if (acc) acc.open = !!state.decisionAccordionOpen;
       const charId = state.activeThread ? state.activeThread.char_id : getEffectiveCharId();
       box.innerHTML = buildDecisionLogInnerHtml(decisionLogs, charId);
+    }
+
+    /* [Ticket 6.4] 新ステートマシン可視化: ステートバッジ・遷移条件・確定タグ・facts・あらすじ */
+    const STATE_MACHINE_META = {
+      "1_Collect_Tags": { cls: "badge-state-collect", label: "🔍 嗜好ヒアリング中" },
+      "1_Icebreak":     { cls: "badge-state-collect", label: "🔍 嗜好ヒアリング中" },
+      "2_Explore":      { cls: "badge-state-collect", label: "🔍 嗜好ヒアリング中" },
+      "2_Pitch_PPV":    { cls: "badge-state-pitch",   label: "💎 PPV提案中" },
+      "3_Cooldown":     { cls: "badge-state-cooldown",label: "🌙 余韻・冷却中" },
+      "Escalate_Stop":  { cls: "badge-state-escalate",label: "🚨 緊急停止（自動返信停止）" },
+      "Low_Priority":   { cls: "badge-state-low",     label: "🔋 省エネモード" },
+    };
+    function getStateMeta(salesPhase) {
+      return STATE_MACHINE_META[salesPhase] || { cls: "badge-state-collect", label: escapeHtml(salesPhase || "未知ステート") };
+    }
+    function renderStateMachineBanner(salesPhase, nextCondition, matchedTags, stateStepTurns) {
+      const meta = getStateMeta(salesPhase);
+      const tagChips = (matchedTags && matchedTags.length)
+        ? matchedTags.map(t => `<span class="badge badge-tier" style="font-size:10px; margin-right:3px;">${escapeHtml(t)}</span>`).join("")
+        : `<span style="font-size:11px; color:var(--text-muted);">（確定タグなし）</span>`;
+      return `
+        <div class="state-machine-banner">
+          <div style="display:flex; align-items:center; gap:7px; flex-wrap:wrap;">
+            <span style="font-size:11px; color:var(--text-muted); font-weight:700;">現在ステート:</span>
+            <span class="badge ${meta.cls}" style="font-size:12px; font-weight:700;">${meta.label}</span>
+            <span class="badge badge-char" style="font-size:10px;">${escapeHtml(salesPhase || "-")}</span>
+            ${stateStepTurns > 0 ? `<span style="font-size:10.5px; color:#94a3b8;">往復 ${escapeHtml(String(stateStepTurns))}</span>` : ""}
+          </div>
+          <div class="state-next-row">➡️ 次の遷移条件: <strong>${escapeHtml(nextCondition || "算出待ち")}</strong></div>
+          <div style="display:flex; align-items:center; gap:5px; flex-wrap:wrap;">
+            <span style="font-size:11px; color:var(--text-muted); font-weight:700;">確定タグ:</span>
+            ${tagChips}
+          </div>
+        </div>
+      `;
     }
 
     function applyThreadDetailData(data, isBackgroundPoll = false) {
@@ -2976,24 +3210,27 @@
       }
 
       const prof = fan.psych_profile || {};
-      const profileSig = JSON.stringify([prof, fan.consecutive_unanswered, fan.consecutive_ppv_ignored, fan.ab_group]);
+      const salesPhase = data.sales_phase || fan.sales_phase || "1_Collect_Tags";
+      const stateStepTurns = Number(data.state_step_turns || 0);
+      const matchedTags = Array.isArray(data.matched_tags) ? data.matched_tags : [];
+      const facts = Array.isArray(data.facts) ? data.facts : [];
+      const conversationSummary = String(data.conversation_summary || "").trim();
+      const nextTransition = String(data.next_transition_condition || "");
+      const profileSig = JSON.stringify([salesPhase, stateStepTurns, matchedTags, facts, conversationSummary, nextTransition, prof]);
       if (!isBackgroundPoll || profileSig !== state.lastProfileSig) {
         state.lastProfileSig = profileSig;
-        const prefsList = prof.preferences || prof.fetishes;
-        const fetishes = Array.isArray(prefsList) ? prefsList.join(", ") : (prefsList || "未抽出");
-        const hooksList = prof.hooks || prof.hot_topics;
-        const hotTopics = Array.isArray(hooksList) ? hooksList.join(", ") : (hooksList || "-");
-        const psychType = prof.psych_type || prof.personality_type || "分析中";
-        const budgetTier = prof.budget_tier || prof.budget_level || "未判定";
+        const factsHtml = facts.length
+          ? `<ul style="margin:3px 0 0 16px; padding:0; font-size:11px; color:#e2e8f0;">${facts.slice(0, 8).map(f => `<li>${escapeHtml(f)}</li>`).join("")}</ul>`
+          : `<div style="font-size:11px; color:var(--text-muted);">（まだ記録なし）</div>`;
+        const summaryHtml = conversationSummary
+          ? `<div style="font-size:11px; color:#cbd5e1; line-height:1.55;">${escapeHtml(conversationSummary)}</div>`
+          : `<div style="font-size:11px; color:var(--text-muted);">（まだ記録なし）</div>`;
         document.getElementById("fanProfileCardContent").innerHTML = `
-          <div><strong style="color:#f8fafc;">心理タイプ:</strong> ${escapeHtml(psychType)}</div>
-          <div><strong style="color:#f8fafc;">推定予算感:</strong> ${escapeHtml(budgetTier)}</div>
-          <div><strong style="color:#f8fafc;">好み・フェチ:</strong> ${escapeHtml(fetishes)}</div>
-          <div><strong style="color:#f8fafc;">反応の良い話題:</strong> ${escapeHtml(hotTopics)}</div>
-          <div><strong style="color:#f8fafc;">メモ:</strong> ${escapeHtml(prof.notes || '-')}</div>
-          <div style="margin-top:4px; font-size:10.5px; color:#94a3b8;">
-            連続未読スルー: ${fan.consecutive_unanswered || 0}回 / PPVスルー: ${fan.consecutive_ppv_ignored || 0}回 / AB群: ${escapeHtml(fan.ab_group || 'A')}
-          </div>
+          ${renderStateMachineBanner(salesPhase, nextTransition, matchedTags, stateStepTurns)}
+          <div style="font-size:11px; color:#d8b4fe; font-weight:700;">📌 確定事実・約束 (Facts)</div>
+          ${factsHtml}
+          <div style="font-size:11px; color:#d8b4fe; font-weight:700; margin-top:5px;">📖 会話あらすじ (Summary)</div>
+          ${summaryHtml}
         `;
       }
 
@@ -3251,7 +3488,163 @@
       const data = await res.json();
       if (data.ok) {
         syncDefaultPricesCache(null, data.default_prices_by_char);
-        renderVaultGrid(data.items || []);
+        const items = data.items || [];
+        renderVaultGrid(items);
+        // [Ticket 6.2] 各カードにカテゴリ別タグチップを描画
+        const categories = await loadMasterTagsIfNeeded();
+        items.forEach(it => {
+          const ck = `${it.char_id}_${it.ppv_id}`;
+          const container = document.getElementById(`vchips-${ck}`);
+          if (!container) return;
+          const ct = it.category_tags || {};
+          container.innerHTML = "";
+          PPV_TAG_CATEGORIES.forEach(cat => {
+            const catData = (categories || {})[cat.key] || {};
+            const tags = catData.tags || [];
+            if (tags.length === 0) return;
+            const section = document.createElement("div");
+            section.className = "cat-tag-section";
+            const label = document.createElement("div");
+            label.className = "cat-label";
+            label.textContent = cat.label;
+            section.appendChild(label);
+            const row = document.createElement("div");
+            row.className = "chip-row";
+            tags.forEach(t => {
+              const chip = document.createElement("button");
+              chip.type = "button";
+              chip.className = "tag-chip";
+              chip.textContent = t.name_ja || t.id;
+              chip.title = `${t.id} (${cat.key})`;
+              if (ct[cat.key] === t.id) chip.classList.add("selected");
+              chip.addEventListener("click", () => {
+                const wasSelected = chip.classList.contains("selected");
+                section.querySelectorAll(".tag-chip").forEach(c => c.classList.remove("selected"));
+                if (!wasSelected) chip.classList.add("selected");
+              });
+              row.appendChild(chip);
+            });
+            section.appendChild(row);
+            container.appendChild(section);
+          });
+        });
+      }
+    }
+
+    /* ==========================================
+       [Ticket 6.3] 未登録ニーズ（NEEDランキング）
+       ========================================== */
+    async function loadUnmatchedNeeds() {
+      const container = document.getElementById("unmatchedNeedsTableContainer");
+      if (!container) return;
+      container.innerHTML = `<div style="text-align:center; padding:24px; color:var(--text-muted); font-size:12px;">読み込み中...</div>`;
+      try {
+        const res = await fetch(`/api/system/unmatched_needs?char_id=${encodeURIComponent(state.selectedCharId || "")}&limit=30`);
+        const data = await res.json();
+        if (!data.ok) {
+          container.innerHTML = `<div style="text-align:center; padding:24px; color:var(--text-alert); font-size:12px;">NEEDリストの読み込みに失敗しました</div>`;
+          return;
+        }
+        renderUnmatchedNeedsTable(data.items || []);
+      } catch (e) {
+        container.innerHTML = `<div style="text-align:center; padding:24px; color:var(--text-alert); font-size:12px;">NEEDリストの読み込みに失敗しました: ${escapeHtml(e.message || "unknown")}</div>`;
+      }
+    }
+
+    function renderUnmatchedNeedsTable(items) {
+      const container = document.getElementById("unmatchedNeedsTableContainer");
+      if (!container) return;
+      if (!items || items.length === 0) {
+        container.innerHTML = `<div style="text-align:center; padding:24px; color:var(--text-muted); font-size:12px;">
+          未登録ニーズはありません。ファンから新しいフェチ・衣装・シチュエーションの要望が抽出されると表示されます。
+        </div>`;
+        return;
+      }
+      const rows = items.map(it => {
+        const keyword = escapeHtml(it.keyword || "");
+        const count = it.count || 0;
+        const quote = escapeHtml((it.latest_quote || "").substring(0, 120));
+        const fans = Array.isArray(it.fans) ? it.fans.map(f => escapeHtml(f)).join(", ") : "";
+        return `<tr>
+          <td style="padding:6px 10px; font-size:12px; font-weight:700; color:#e9d5ff; white-space:nowrap;">${keyword}</td>
+          <td style="padding:6px 10px; font-size:12px; text-align:center; color:#4ade80; font-weight:800;">${count}</td>
+          <td style="padding:6px 10px; font-size:11.5px; color:var(--text-muted); max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${quote}">${quote}</td>
+          <td style="padding:6px 10px; font-size:10.5px; color:var(--text-muted); max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${fans}">${fans}</td>
+          <td style="padding:6px 10px; text-align:center;">
+            <button class="btn btn-sm btn-primary" style="font-size:11px; padding:3px 10px;" onclick="openPromoteNeedModal('${keyword}')">＋ マスタータグへ昇格</button>
+          </td>
+        </tr>`;
+      }).join("");
+      container.innerHTML = `
+        <table style="width:100%; border-collapse:collapse;">
+          <thead>
+            <tr style="border-bottom:1px solid var(--border);">
+              <th style="padding:8px 10px; font-size:11px; color:var(--text-muted); text-align:left;">キーワード</th>
+              <th style="padding:8px 10px; font-size:11px; color:var(--text-muted); text-align:center;">要望人数</th>
+              <th style="padding:8px 10px; font-size:11px; color:var(--text-muted); text-align:left;">最新セリフ（引用）</th>
+              <th style="padding:8px 10px; font-size:11px; color:var(--text-muted); text-align:left;">ファン</th>
+              <th style="padding:8px 10px; font-size:11px; color:var(--text-muted); text-align:center;"></th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>`;
+    }
+
+    function openPromoteNeedModal(keyword) {
+      const modal = document.getElementById("promoteNeedModal");
+      if (!modal) return;
+      modal.classList.add("open");
+      document.getElementById("promoteNeedKeyword").value = keyword;
+      // [Ticket 6.3] 昇格先カテゴリを毎回デフォルト (play) にリセット
+      const playRadio = document.querySelector('input[name="promoteNeedCategory"][value="play"]');
+      if (playRadio) playRadio.checked = true;
+      document.getElementById("promoteNeedNameJa").value = "";
+      document.getElementById("promoteNeedLlmHint").value = "";
+      document.getElementById("promoteNeedStatus").textContent = "";
+      document.getElementById("promoteNeedStatus").style.color = "";
+    }
+
+    function closePromoteNeedModal() {
+      const modal = document.getElementById("promoteNeedModal");
+      if (modal) modal.classList.remove("open");
+    }
+
+    async function submitPromoteNeed() {
+      const keyword = document.getElementById("promoteNeedKeyword").value.trim().toLowerCase();
+      const nameJa = document.getElementById("promoteNeedNameJa").value.trim();
+      const llmHint = document.getElementById("promoteNeedLlmHint").value.trim();
+      // [Ticket 6.3] 選択された昇格先カテゴリを決定 (play / body_outfit / situation)
+      const catRadio = document.querySelector('input[name="promoteNeedCategory"]:checked');
+      const category = catRadio ? catRadio.value : "play";
+      const statusEl = document.getElementById("promoteNeedStatus");
+      if (!keyword) {
+        statusEl.textContent = "キーワードを入力してください";
+        statusEl.style.color = "var(--text-alert)";
+        return;
+      }
+      statusEl.textContent = "昇格中...";
+      statusEl.style.color = "var(--text-muted)";
+      try {
+        const res = await fetch("/api/system/unmatched_needs/promote", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ keyword, name_ja: nameJa, llm_hint: llmHint, category: category }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          statusEl.textContent = `✅ ${data.message || "昇格しました"}`;
+          statusEl.style.color = "#4ade80";
+          state.masterTags = null; // キャッシュ破棄 → 次回loadVaultListで再取得
+          closePromoteNeedModal();
+          showToast(`📊 NEED '${keyword}' を ${category} カテゴリに昇格しました`);
+          loadUnmatchedNeeds();
+        } else {
+          statusEl.textContent = `❌ ${data.error || "昇格に失敗しました"}`;
+          statusEl.style.color = "var(--text-alert)";
+        }
+      } catch (e) {
+        statusEl.textContent = `❌ 通信エラー: ${escapeHtml(e.message || "unknown")}`;
+        statusEl.style.color = "var(--text-alert)";
       }
     }
 
@@ -3319,6 +3712,9 @@
                   <strong style="font-size:11.5px; color:#e9d5ff; display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(it.filename)}">
                     ${escapeHtml(it.ppv_id)} <span style="font-weight:400; color:var(--text-muted); font-size:10px;">(${escapeHtml(it.filename)})</span>
                   </strong>
+                  <div style="display:flex; flex-wrap:wrap; gap:3px; margin-top:3px;">
+                    ${buildCategoryTagsHtml(it)}
+                  </div>
                 </div>
                 <div class="vault-mini-stats">
                   <span>提案 <strong>${it.offers_count || 0}</strong></span>
@@ -3360,14 +3756,12 @@
               </div>
 
               <div class="form-group">
-                <div style="display:flex; justify-content:space-between; align-items:center; gap:4px;">
-                  <label style="font-size:10.5px;">③ 属性タグ (日本語・カンマ区切り)</label>
-                  <button type="button" id="vbtn-${escapeHtml(ck)}" class="btn btn-sm" style="padding:2px 7px; font-size:10px; border-color:#a855f7; color:#e9d5ff;"
-                    onclick="reanalyzeVaultCardWithVision('${escapeHtml(it.char_id)}', '${escapeHtml(it.ppv_id)}', '${escapeHtml(ck)}')">
-                    ✨ AIでタグ・メモを自動生成
-                  </button>
-                </div>
-                <input type="text" id="tags-${escapeHtml(ck)}" class="input-ctrl" style="padding:4px 8px; font-size:11px;" value="${escapeHtml(tagsStr)}" placeholder="ランジェリー, 黒レース, 寝室, 自撮り">
+                <label style="font-size:10.5px;">③ カテゴリ別マスタータグ（各 0〜1個 / 合計 1〜3個）</label>
+                <div id="vchips-${escapeHtml(ck)}" style="display:flex; flex-direction:column; gap:4px; margin-top:3px;"></div>
+                <label style="display:flex; align-items:center; gap:5px; font-size:10.5px; margin-top:5px; cursor:pointer;">
+                  <input type="checkbox" id="vgeneral-${escapeHtml(ck)}" ${it.is_general ? 'checked' : ''}>
+                  <span>🌟 汎用おすすめ（is_general）</span>
+                </label>
               </div>
 
               <div class="vault-memo-2col">
@@ -3411,35 +3805,22 @@
       }
     }
 
-    async function reanalyzeVaultCardWithVision(charId, ppvId, cardKey) {
-      const btn = document.getElementById(`vbtn-${cardKey}`);
-      if (btn) { btn.disabled = true; btn.textContent = "⏳ Vision解析中..."; }
-      showToast(`✨ ローカルVision LLMで ${ppvId} の画像/動画を解析中...`);
-      try {
-        const stepVal = parseInt(document.getElementById(`step-${cardKey}`)?.value || "1", 10);
-        const res = await fetch("/api/vault/analyze_vision", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ char_id: charId, ppv_id: ppvId, ladder_step: stepVal, save_to_vault: true }),
-        });
-        const data = await res.json();
-        if (data.ok) {
-          const tagsEl = document.getElementById(`tags-${cardKey}`);
-          const memoEl = document.getElementById(`memo-${cardKey}`);
-          const pitchEl = document.getElementById(`pitch-${cardKey}`);
-          if (tagsEl) tagsEl.value = (data.tags || []).join(", ");
-          if (memoEl) memoEl.value = data.description_memo || "";
-          if (pitchEl && data.pitch_hint) pitchEl.value = data.pitch_hint;
-          state.lastManualPpvCharId = "";
-          const modelLabel = data.vision_model ? ` (${data.vision_model})` : "";
-          showToast(`✨ タグ＆売り込みメモを自動生成・DB保存しました${modelLabel}`);
-        }
-      } finally {
-        if (btn) { btn.disabled = false; btn.textContent = "✨ AIでタグ・メモを自動生成"; }
-      }
-    }
-
     async function saveVaultCard(charId, ppvId, cardKey) {
+      const container = document.getElementById(`vchips-${cardKey}`);
+      const selectedTags = { play: [], body_outfit: [], situation: [] };
+      if (container) {
+        const sections = container.querySelectorAll(".cat-tag-section");
+        PPV_TAG_CATEGORIES.forEach((cat, i) => {
+          const section = sections[i];
+          if (!section) return;
+          const sel = section.querySelector(".tag-chip.selected");
+          if (sel) {
+            const m = sel.title.match(/^([^ (]+) \(/);
+            if (m) selectedTags[cat.key] = [m[1]];
+          }
+        });
+      }
+      const isGeneral = document.getElementById(`vgeneral-${cardKey}`)?.checked ? 1 : 0;
       const payload = {
         char_id: charId,
         ppv_id: ppvId,
@@ -3448,7 +3829,9 @@
         tripwire_price_usd: parseFloat(document.getElementById(`trip-${cardKey}`).value),
         base_price_usd: parseFloat(document.getElementById(`base-${cardKey}`).value),
         whale_price_usd: parseFloat(document.getElementById(`whale-${cardKey}`).value),
-        tags: document.getElementById(`tags-${cardKey}`).value,
+        tags: [selectedTags.play, selectedTags.body_outfit, selectedTags.situation].flat().join(", "),
+        category_tags: selectedTags,
+        is_general: isGeneral,
         description_memo: document.getElementById(`memo-${cardKey}`)?.value || "",
         pitch_hint: document.getElementById(`pitch-${cardKey}`).value,
       };
@@ -3462,6 +3845,7 @@
         state.lastManualPpvCharId = "";
         showToast(`💾 ${ppvId} の設定・売り込みメモを保存しました`);
         loadVaultList();
+        loadUnmatchedNeeds();
       }
     }
 
@@ -3505,6 +3889,8 @@
 
     function renderEvolutionStatusUI(evo) {
       if (!evo || !evo.ok) return;
+      /* [Ticket 6.5] A/Bテスト・チップ誘導・休眠掘り起こしUIは全て非表示化済みのため、DOM描画をスキップ */
+      return;
       const pbA = evo.playbook_a || {};
       const pbB = evo.playbook_b || null;
       const cmp = evo.ab_comparison || {};
@@ -3751,7 +4137,7 @@
       simPsychProfile = {};
       simDecisionLogs = [];
       simStageScore = null;
-      document.getElementById("simSalesPhase").value = "1_Icebreak";
+      document.getElementById("simSalesPhase").value = "1_Collect_Tags";
       document.getElementById("simChatHistoryBox").innerHTML = `
         <div style="color:var(--text-muted); font-size:12px; text-align:center; margin-top:40px;">
           シミュレーション履歴・顧客カルテ・検討ログをリセットしました。
@@ -3854,25 +4240,35 @@
       const tipHook = data.tip_hook || {};
       const recFname = rec ? (rec.filename || rec.ppv_id) : "";
 
+      const stateMeta = data.state_meta || {};
+      const nextCond = stateMeta.next_transition_condition || data.next_stage || "";
+      const reasonJa = stateMeta.reason_ja || data.score_reason_ja || "";
+      const matchedTags = stateMeta.matched_tags || [];
+      const matchedTagsHtml = matchedTags.length > 0 ? matchedTags.map(t => `<span class="badge badge-tag" style="margin:2px;">${escapeHtml(t)}</span>`).join("") : `<span style="color:var(--text-muted);">（未抽出）</span>`;
+      const profFacts = prof.facts || [];
+      const profSummary = prof.conversation_summary || "";
+      const profMatchedTags = prof.matched_tags || [];
+      const profTagsHtml = profMatchedTags.length > 0 ? profMatchedTags.map(t => `<span class="badge badge-tag" style="margin:2px;">${escapeHtml(t)}</span>`).join("") : `<span style="color:var(--text-muted);">（未確定）</span>`;
+      const factsHtml = profFacts.length > 0 ? `<ul style="margin:4px 0 4px 16px; padding:0; font-size:11px;">${profFacts.map(f => `<li>${escapeHtml(f)}</li>`).join("")}</ul>` : "";
+
       document.getElementById("simInspectorOutput").innerHTML = `
         <div class="profile-section">
-          <h4>🎯 フェーズ遷移 ＆ 動的プライシング判定</h4>
-          <div><strong>フェーズ:</strong> <span class="badge badge-phase">${escapeHtml(data.sales_phase)}</span></div>
-          <div><strong>価格モード:</strong> <span class="badge badge-tier">${escapeHtml((data.pricing_tier || '').toUpperCase())}</span></div>
-          <div><strong>適用ルール:</strong> <span class="badge badge-char">AB群 ${escapeHtml(data.ab_group || 'A')} (${escapeHtml(data.prompt_version || 'v1-A')})</span></div>
-          <div><strong>ガードレール:</strong> ${data.is_escalated ? `<span class="badge badge-alert">🚨 緊急停止 (${escapeHtml(data.escalation_reason || '危険ワード')})</span>` : (data.is_low_priority ? '<span class="badge badge-low">🔋 省エネ降格 (6_Low_Priority)</span>' : '🟢 正常稼働')}</div>
+          <h4>🎯 ステートマシン遷移判定（新3段階）</h4>
+          <div><strong>現在ステート:</strong> <span class="badge badge-phase">${escapeHtml(data.sales_phase)}</span></div>
+          <div><strong>遷移理由:</strong> <span style="font-size:11px;">${escapeHtml(reasonJa)}</span></div>
+          <div><strong>次の遷移条件:</strong> <span style="font-size:11px;">${escapeHtml(nextCond)}</span></div>
+          <div><strong>耳役抽出タグ:</strong> ${matchedTagsHtml}</div>
+          <div><strong>ガードレール:</strong> ${data.is_escalated ? `<span class="badge badge-alert">🚨 緊急停止 (${escapeHtml(data.escalation_reason || '危険ワード')})</span>` : (data.is_low_priority ? '<span class="badge badge-low">🔋 省エネ降格 (Low_Priority)</span>' : '🟢 正常稼働')}</div>
         </div>
         <div class="profile-section">
-          <h4>💎 階段式PPV 推薦 ／ 💰 チップ誘導判定</h4>
-          ${tipHook.triggered ? `<div style="color:#fde047; font-weight:700;">💰 チップ誘導フック発動 ($${Number(tipHook.suggested_amount_usd || 5).toFixed(2)})<br><span style="font-size:11px; color:#cbd5e1; font-weight:400;">理由: ${escapeHtml(tipHook.reason || '')}</span></div>` : (rec ? `<div><span class="ppv-jump-link" onclick="jumpToVaultItem('${escapeHtml(charId)}', '${escapeHtml(rec.ppv_id)}', '${escapeHtml(recFname)}')">💎 ${escapeHtml(recFname)} ↗</span> (Step ${rec.ladder_step}) • <strong style="color:#4ade80;">$${Number(rec.offered_price_usd || 0).toFixed(2)}</strong><br><span style="color:#e2e8f0;">${escapeHtml(rec.description_memo || rec.pitch_hint || '')}</span></div>` : `<div>推薦PPV・チップ誘導なし</div>`)}
+          <h4>💎 PPV 推薦（機械選定）</h4>
+          ${rec ? `<div><span class="ppv-jump-link" onclick="jumpToVaultItem('${escapeHtml(charId)}', '${escapeHtml(rec.ppv_id)}', '${escapeHtml(recFname)}')">💎 ${escapeHtml(recFname)} ↗</span> (Step ${rec.ladder_step}) • <strong style="color:#4ade80;">$${Number(rec.offered_price_usd || 0).toFixed(2)}</strong><br><span style="color:#e2e8f0;">${escapeHtml(rec.description_memo || rec.pitch_hint || '')}</span></div>` : `<div>推薦PPVなし</div>`}
         </div>
         <div class="profile-section">
-          <h4>🧠 顧客カルテ更新プレビュー (psych_profile_json)</h4>
-          <div><strong>心理タイプ (psych_type):</strong> ${escapeHtml(psychTypeStr)}</div>
-          <div><strong>推定予算感 (budget_tier):</strong> ${escapeHtml(budgetTierStr)}</div>
-          <div><strong>好み・フェチ (preferences):</strong> ${escapeHtml(prefsStr)}</div>
-          <div><strong>反応が良い話題 (hooks):</strong> ${escapeHtml(hooksStr)}</div>
-          ${notesStr ? `<div><strong>営業メモ (notes):</strong> ${escapeHtml(notesStr)}</div>` : ''}
+          <h4>🧠 顧客カルテ（構造化長期記憶）</h4>
+          <div><strong>確定タグ:</strong> ${profTagsHtml}</div>
+          ${profFacts.length > 0 ? `<div style="margin-top:6px;"><strong>確定事実・約束 (facts):</strong></div>${factsHtml}` : ""}
+          ${profSummary ? `<div style="margin-top:6px;"><strong>会話あらすじ:</strong><div style="font-size:11px; color:#cbd5e1; margin-top:2px;">${escapeHtml(profSummary)}</div></div>` : ""}
         </div>`;
 
       const simAcc = document.getElementById("simDecisionLogAccordion");
@@ -3905,8 +4301,6 @@
       document.getElementById("modalPpvCharSelect").value = charId;
       state.selectedPpvFile = null;
       state.selectedPpvFilename = "";
-      state.modalVisionPromise = null;
-      state.modalVisionDone = false;
       const fileInp = document.getElementById("ppvFileInput");
       if (fileInp) fileInp.value = "";
       const box = document.getElementById("ppvModalPreviewBox");
@@ -3915,19 +4309,20 @@
         box.onclick = null;
         box.innerHTML = `<span style="font-size:11px; color:var(--text-muted);">プレビュー待機中</span>`;
       }
-      const badge = document.getElementById("modalVisionStatusBadge");
-      if (badge) badge.textContent = "";
-      document.getElementById("modalPpvTags").value = "";
       if (document.getElementById("modalPpvDescriptionMemo")) {
         document.getElementById("modalPpvDescriptionMemo").value = "";
       }
       document.getElementById("modalPpvPitchHint").value = "";
+      const isGen = document.getElementById("modalPpvIsGeneral");
+      if (isGen) isGen.checked = false;
       const step = parseInt(document.getElementById("modalPpvLadderStep").value || "1", 10);
       const localPrices = getStepDefaultPrices(charId, step);
       document.getElementById("modalPpvTripwirePrice").value = Number(localPrices.tripwire_price_usd).toFixed(2);
       document.getElementById("modalPpvBasePrice").value = Number(localPrices.base_price_usd).toFixed(2);
       document.getElementById("modalPpvWhalePrice").value = Number(localPrices.whale_price_usd).toFixed(2);
       document.getElementById("addPpvModal").classList.add("open");
+      const categories = await loadMasterTagsIfNeeded();
+      renderModalCategoryTagChips(categories, {});
     }
 
     function closeAddPpvModal() {
@@ -3938,9 +4333,7 @@
       if (!file) return;
       state.selectedPpvFile = file;
       state.selectedPpvFilename = file.name;
-      state.modalVisionDone = false;
 
-      document.getElementById("modalPpvTags").value = "";
       if (document.getElementById("modalPpvDescriptionMemo")) {
         document.getElementById("modalPpvDescriptionMemo").value = "";
       }
@@ -3960,8 +4353,6 @@
       } else {
         box.innerHTML = `<img src="${url}" style="width:100%;height:100%;object-fit:contain;background:#07050c;">`;
       }
-      state.modalVisionPromise = runModalVisionAutoGenerate();
-      await state.modalVisionPromise;
     }
 
     async function refreshModalDraftByStep() {
@@ -3971,88 +4362,20 @@
       document.getElementById("modalPpvTripwirePrice").value = Number(localPrices.tripwire_price_usd).toFixed(2);
       document.getElementById("modalPpvBasePrice").value = Number(localPrices.base_price_usd).toFixed(2);
       document.getElementById("modalPpvWhalePrice").value = Number(localPrices.whale_price_usd).toFixed(2);
-      if (state.selectedPpvFile) {
-        state.modalVisionPromise = runModalVisionAutoGenerate();
-        await state.modalVisionPromise;
-      }
-    }
-
-    async function runModalVisionAutoGenerate() {
-      const charId = document.getElementById("modalPpvCharSelect").value || getEffectiveCharId();
-      const step = parseInt(document.getElementById("modalPpvLadderStep").value || "1", 10);
-      const badge = document.getElementById("modalVisionStatusBadge");
-      const btn = document.getElementById("btnModalVisionGen");
-      if (!state.selectedPpvFile) {
-        await regenerateModalAiDraft();
-        return;
-      }
-      if (btn) { btn.disabled = true; btn.textContent = "⏳ Vision解析中..."; }
-      if (badge) badge.textContent = "🔍 Visionモデルで素材（動画は1枚目サムネ）を解析中...";
-      try {
-        const fd = new FormData();
-        fd.append("char_id", charId);
-        fd.append("ladder_step", String(step));
-        fd.append("file", state.selectedPpvFile);
-        const res = await fetch("/api/vault/analyze_vision", { method: "POST", body: fd });
-        const data = await res.json();
-        if (data.ok) {
-          document.getElementById("modalPpvTripwirePrice").value = Number(data.tripwire_price_usd).toFixed(2);
-          document.getElementById("modalPpvBasePrice").value = Number(data.base_price_usd).toFixed(2);
-          document.getElementById("modalPpvWhalePrice").value = Number(data.whale_price_usd).toFixed(2);
-          document.getElementById("modalPpvTags").value = (data.tags || []).join(", ");
-          document.getElementById("modalPpvDescriptionMemo").value = data.description_memo || "";
-          document.getElementById("modalPpvPitchHint").value = data.pitch_hint || "";
-          state.modalVisionDone = !!data.used_vision;
-          if (badge) {
-            badge.textContent = data.used_vision
-              ? `✅ Vision解析完了 (${data.vision_model || 'Qwen 2.5 VL'})`
-              : `✅ AI自動生成完了`;
-          }
-        }
-      } catch (err) {
-        if (badge) badge.textContent = "⚠️ 登録時に自動再解析します";
-      } finally {
-        state.modalVisionPromise = null;
-        if (btn) { btn.disabled = false; btn.textContent = "✨ AIでタグ・メモを自動生成"; }
-      }
-    }
-
-    async function regenerateModalAiDraft() {
-      const charId = document.getElementById("modalPpvCharSelect").value || getEffectiveCharId();
-      const step = parseInt(document.getElementById("modalPpvLadderStep").value || "1", 10);
-      const filename = state.selectedPpvFilename || "secret_bedroom_clip.mp4";
-
-      const res = await fetch("/api/vault/preview_draft", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ char_id: charId, filename: filename, ladder_step: step }),
-      });
-      const data = await res.json();
-      if (data.ok) {
-        document.getElementById("modalPpvTripwirePrice").value = Number(data.tripwire_price_usd).toFixed(2);
-        document.getElementById("modalPpvBasePrice").value = Number(data.base_price_usd).toFixed(2);
-        document.getElementById("modalPpvWhalePrice").value = Number(data.whale_price_usd).toFixed(2);
-        document.getElementById("modalPpvTags").value = (data.tags || []).join(", ");
-        if (document.getElementById("modalPpvDescriptionMemo")) {
-          document.getElementById("modalPpvDescriptionMemo").value = data.description_memo || "";
-        }
-        document.getElementById("modalPpvPitchHint").value = data.pitch_hint || "";
-      }
     }
 
     async function submitUploadPpv() {
-      if (state.modalVisionPromise) {
-        showToast("⏳ Vision解析の完了を待機しています...");
-        try { await state.modalVisionPromise; } catch (e) {}
-      }
       const charId = document.getElementById("modalPpvCharSelect").value || getEffectiveCharId();
       const step = document.getElementById("modalPpvLadderStep").value || "1";
       const tripPrice = document.getElementById("modalPpvTripwirePrice").value;
       const basePrice = document.getElementById("modalPpvBasePrice").value;
       const whalePrice = document.getElementById("modalPpvWhalePrice").value;
-      const tags = document.getElementById("modalPpvTags").value;
       const descMemo = document.getElementById("modalPpvDescriptionMemo")?.value || "";
       const pitch = document.getElementById("modalPpvPitchHint").value;
+      const isGeneral = document.getElementById("modalPpvIsGeneral")?.checked ? "1" : "0";
+      const categoryTags = buildCategoryTagsPayloadFromModal();
+      const tagsCsv = [categoryTags.play, categoryTags.body_outfit, categoryTags.situation]
+        .flat().filter(Boolean).join(", ");
 
       const formData = new FormData();
       formData.append("char_id", charId);
@@ -4060,14 +4383,13 @@
       formData.append("tripwire_price_usd", tripPrice);
       formData.append("base_price_usd", basePrice);
       formData.append("whale_price_usd", whalePrice);
-      formData.append("tags", tags);
+      formData.append("tags", tagsCsv);
       formData.append("description_memo", descMemo);
       formData.append("pitch_hint", pitch);
+      formData.append("is_general", isGeneral);
+      formData.append("category_tags", JSON.stringify(categoryTags));
       if (state.selectedPpvFile) {
         formData.append("file", state.selectedPpvFile);
-        if (!state.modalVisionDone || !tags.trim() || !descMemo.trim()) {
-          formData.append("auto_vision", "1");
-        }
       } else {
         formData.append("filename", state.selectedPpvFilename || "secret_clip.mp4");
       }
@@ -4076,13 +4398,126 @@
       const data = await res.json();
       if (data.ok) {
         state.selectedPpvFile = null;
-        state.modalVisionDone = false;
         state.lastManualPpvCharId = "";
         closeAddPpvModal();
         showToast(`💎 PPV素材 (${data.item.ppv_id}) を武器庫＆ぼかしプレビュー付きで登録しました`);
         await fetchSystemState();
         loadVaultList();
       }
+    }
+
+    /* [Ticket 6.2] カテゴリ別タグチップUI用ヘルパー */
+    const PPV_TAG_CATEGORIES = [
+      { key: "play", label: "🎮 プレイ・属性" },
+      { key: "body_outfit", label: "👙 パーツ・衣装" },
+      { key: "situation", label: "📍 シチュエーション" },
+    ];
+
+    async function loadMasterTagsIfNeeded() {
+      if (state.masterTags) return state.masterTags;
+      try {
+        const res = await fetch("/api/tags/master");
+        const data = await res.json();
+        if (data.ok && data.categories) {
+          state.masterTags = data.categories;
+        } else {
+          // フォールバック: master_tags.json を直接読むAPIが未実装の場合
+          state.masterTags = {};
+        }
+      } catch (e) {
+        state.masterTags = {};
+      }
+      return state.masterTags;
+    }
+
+    function renderModalCategoryTagChips(categories, selectedTags) {
+      const container = document.getElementById("modalCategoryTagChips");
+      if (!container) return;
+      container.innerHTML = "";
+      PPV_TAG_CATEGORIES.forEach(cat => {
+        const catData = (categories || {})[cat.key] || {};
+        const tags = catData.tags || [];
+        const section = document.createElement("div");
+        section.className = "cat-tag-section";
+        const label = document.createElement("div");
+        label.className = "cat-label";
+        label.textContent = cat.label;
+        section.appendChild(label);
+        const row = document.createElement("div");
+        row.className = "chip-row";
+        if (tags.length === 0) {
+          const empty = document.createElement("span");
+          empty.style.cssText = "font-size:10.5px; color:var(--text-muted);";
+          empty.textContent = "（タグ未定義）";
+          row.appendChild(empty);
+        } else {
+          tags.forEach(t => {
+            const chip = document.createElement("button");
+            chip.type = "button";
+            chip.className = "tag-chip";
+            chip.textContent = t.name_ja || t.id;
+            chip.title = `${t.id} (${cat.key})`;
+            if (selectedTags && selectedTags[cat.key] === t.id) {
+              chip.classList.add("selected");
+            }
+            chip.addEventListener("click", () => toggleModalPpvTagChip(cat.key, t.id, container));
+            row.appendChild(chip);
+          });
+        }
+        section.appendChild(row);
+        container.appendChild(section);
+      });
+    }
+
+    function toggleModalPpvTagChip(categoryKey, tagId, container) {
+      // 対象カテゴリ内のチップを全部オフにして、対象チップのみオン（1カテゴリ 0〜1個選択）
+      const sections = container.querySelectorAll(".cat-tag-section");
+      const idx = PPV_TAG_CATEGORIES.findIndex(c => c.key === categoryKey);
+      const section = sections[idx];
+      if (!section) return;
+      const chips = section.querySelectorAll(".tag-chip");
+      const target = Array.from(chips).find(c => c.title === `${tagId} (${categoryKey})`);
+      const wasSelected = target ? target.classList.contains("selected") : false;
+      chips.forEach(c => c.classList.remove("selected"));
+      if (!wasSelected && target) target.classList.add("selected");
+    }
+
+    function getSelectedModalPpvTags() {
+      const container = document.getElementById("modalCategoryTagChips");
+      const result = { play: "", body_outfit: "", situation: "" };
+      if (!container) return result;
+      const sections = container.querySelectorAll(".cat-tag-section");
+      PPV_TAG_CATEGORIES.forEach((cat, i) => {
+        const section = sections[i];
+        if (!section) return;
+        const sel = section.querySelector(".tag-chip.selected");
+        if (sel) {
+          const idMatch = sel.title.match(/^([^ (]+) \(/);
+          if (idMatch) result[cat.key] = idMatch[1];
+        }
+      });
+      return result;
+    }
+
+    function buildCategoryTagsPayloadFromModal() {
+      const sel = getSelectedModalPpvTags();
+      return {
+        play: sel.play ? [sel.play] : [],
+        body_outfit: sel.body_outfit ? [sel.body_outfit] : [],
+        situation: sel.situation ? [sel.situation] : [],
+      };
+    }
+
+    function buildCategoryTagsHtml(it) {
+      const ct = it.category_tags || {};
+      const badge = (catKey, tagId) => {
+        if (!tagId) return "";
+        const nameJa = (state.masterTags?.[catKey]?.tags || []).find(t => t.id === tagId)?.name_ja || tagId;
+        return `<span class="vault-tag-badge cat-${catKey}" title="${escapeHtml(tagId)}">${escapeHtml(nameJa)}</span>`;
+      };
+      const badges = [badge("play", ct.play), badge("body_outfit", ct.body_outfit), badge("situation", ct.situation)].filter(Boolean).join("");
+      const general = it.is_general ? `<span class="vault-general-badge" title="汎用おすすめ（救済PPV候補）">🌟 汎用おすすめ</span>` : "";
+      return badges + general;
     }
 
     /* モーダル2：[⚙️ 設定] モーダル制御 */
@@ -4281,6 +4716,20 @@
       const stageThreshSrc = data.stage_thresholds || sysD.stage_thresholds || s.stage_thresholds || state.stageThresholds;
       applyStageThresholdsToInputs(stageThreshSrc);
 
+      // 新設定項目（Discord / デバウンス / ステートマシン / DM用Ollama）
+      // システム共通値（system_settings）優先、キャラ別値（settings）フォールバック
+      const pick = (key, def) => {
+        const v = sysD[key] !== undefined ? sysD[key] : (s[key] !== undefined ? s[key] : def);
+        return v;
+      };
+      document.getElementById("setDiscordWebhookUrl").value = pick("discord_webhook_url", "") || "";
+      document.getElementById("setDebounceSeconds").value = Number(pick("debounce_seconds", 18));
+      document.getElementById("setTagCollectTargetCount").value = Number(pick("tag_collect_target_count", 2));
+      document.getElementById("setTagCollectMaxTurns").value = Number(pick("tag_collect_max_turns", 5));
+      document.getElementById("setCooldownTurnsThreshold").value = Number(pick("cooldown_turns_threshold", 3));
+      document.getElementById("setDmOllamaBaseUrl").value = pick("dm_ollama_base_url", "") || "";
+      document.getElementById("setDmOllamaModelName").value = pick("dm_ollama_model_name", "") || "";
+
       await loadEvolutionStatus(charId);
     }
 
@@ -4371,6 +4820,14 @@
           start: document.getElementById("setSleepStart").value || "19:00",
           end: document.getElementById("setSleepEnd").value || "22:00",
         },
+        // 新設定項目（Discord / デバウンス / ステートマシン / DM用Ollama）
+        discord_webhook_url: document.getElementById("setDiscordWebhookUrl").value.trim(),
+        debounce_seconds: parseInt(document.getElementById("setDebounceSeconds").value, 10) || 18,
+        tag_collect_target_count: parseInt(document.getElementById("setTagCollectTargetCount").value, 10) || 2,
+        tag_collect_max_turns: parseInt(document.getElementById("setTagCollectMaxTurns").value, 10) || 5,
+        cooldown_turns_threshold: parseInt(document.getElementById("setCooldownTurnsThreshold").value, 10) || 3,
+        dm_ollama_base_url: document.getElementById("setDmOllamaBaseUrl").value.trim(),
+        dm_ollama_model_name: document.getElementById("setDmOllamaModelName").value.trim(),
       };
 
       const res = await fetch("/api/settings/save", {
@@ -4388,8 +4845,55 @@
       }
       applyStageThresholdsToInputs(data.stage_thresholds || stageCheck.thresholds);
       closeSettingsModal();
-      showToast("⚙️ 初期価格・AI返信待機時間・ステージ突破閾値・睡眠設定を保存しました");
+      showToast("⚙️ 初期価格・AI返信待機時間・睡眠設定・Discord/ステートマシン/DM Ollama 設定を保存しました");
       await fetchSystemState();
+    }
+
+    async function testDiscordWebhook() {
+      const url = (document.getElementById("setDiscordWebhookUrl").value || "").trim();
+      const resultEl = document.getElementById("discordTestResult");
+      if (!url) {
+        if (resultEl) { resultEl.textContent = "⚠️ Webhook URLが未設定です"; resultEl.style.color = "#f87171"; }
+        showToast("⚠️ Discord Webhook URLが未設定です");
+        return;
+      }
+      if (resultEl) { resultEl.textContent = "⏳ テストメッセージを送信中..."; resultEl.style.color = "var(--text-muted)"; }
+      const sendDirect = async () => {
+        // フォールバック: バックエンド /api/settings/test_discord が無い場合、Webhookへ直接POST
+        const r = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: "✅ AI DM Sales システムのDiscord通知テストです。" }),
+        });
+        return r.ok;
+      };
+      try {
+        let ok = false;
+        let errMsg = "";
+        try {
+          const res = await fetch("/api/settings/test_discord", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ discord_webhook_url: url }),
+          });
+          const data = await res.json();
+          ok = !!res.ok && !!data.ok;
+          if (!ok) errMsg = data.error || "テスト送信に失敗しました";
+        } catch (apiErr) {
+          ok = await sendDirect();
+          if (!ok) errMsg = "Webhook直接送信に失敗しました";
+        }
+        if (ok) {
+          if (resultEl) { resultEl.textContent = "✅ テスト通知が送信されました"; resultEl.style.color = "#4ade80"; }
+          showToast("🔔 Discord テスト通知が送信されました");
+        } else {
+          if (resultEl) { resultEl.textContent = `❌ ${errMsg}`; resultEl.style.color = "#f87171"; }
+          showToast(`⚠️ ${errMsg}`);
+        }
+      } catch (e) {
+        if (resultEl) { resultEl.textContent = "❌ リクエストエラー"; resultEl.style.color = "#f87171"; }
+        showToast(`⚠️ テスト送信エラー: ${e.message}`);
+      }
     }
 
     async function launchFanslyLoginBrowser() {

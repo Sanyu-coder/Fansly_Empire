@@ -200,6 +200,13 @@ def _normalize_settings(raw: Dict[str, Any]) -> Dict[str, Any]:
         fallback=sys_stage_thresh,
     )
 
+    def _to_int_str(val: Any, default: str) -> str:
+        """int/float/str 入力を桁数なし整数文字列へ正規化（失敗時はデフォルト）"""
+        try:
+            return str(int(float(val)))
+        except (TypeError, ValueError):
+            return default
+
     return {
         "bot_enabled": bot_enabled,
         "default_prices": norm_prices,
@@ -212,6 +219,14 @@ def _normalize_settings(raw: Dict[str, Any]) -> Dict[str, Any]:
         "stage_threshold_icebreak": stage_thresholds["1_Icebreak"],
         "stage_threshold_explore": stage_thresholds["2_Explore"],
         "stage_threshold_lead_pitch": stage_thresholds["3_Lead_Pitch"],
+        # Discord通知・ステートマシン・DM推論用Ollama（Ticket 5.3）
+        "discord_webhook_url": str(raw.get("discord_webhook_url") or "").strip(),
+        "debounce_seconds": _to_int_str(raw.get("debounce_seconds"), "18"),
+        "tag_collect_target_count": _to_int_str(raw.get("tag_collect_target_count"), "1"),
+        "tag_collect_max_turns": _to_int_str(raw.get("tag_collect_max_turns"), "5"),
+        "cooldown_turns_threshold": _to_int_str(raw.get("cooldown_turns_threshold"), "3"),
+        "dm_ollama_base_url": str(raw.get("dm_ollama_base_url") or "").strip(),
+        "dm_ollama_model_name": str(raw.get("dm_ollama_model_name") or "").strip(),
     }
 
 
@@ -276,6 +291,24 @@ def _normalize_vault_item(char_id: str, item: Dict[str, Any], index_num: int) ->
             if os.path.isfile(cand_abs) and os.path.getsize(cand_abs) > 0:
                 blur_preview_filename = cand_rel
 
+    # [Ticket 6.2] カテゴリ別タグ (play/body_outfit/situation) を dict 化して返却。
+    # 消費側（buildCategoryTagsHtml / 編集チップ selected 判定）は各カテゴリの string を
+    # 想定しているため、list の場合は先頭要素のみを取り、空の場合は空文字にする。
+    ct_raw = item.get("category_tags")
+    if not isinstance(ct_raw, dict):
+        try:
+            ct_raw = json.loads(str(item.get("category_tags_json") or "{}"))
+        except Exception:
+            ct_raw = {}
+    if not isinstance(ct_raw, dict):
+        ct_raw = {}
+    category_tags: Dict[str, str] = {}
+    for _cat_key in ("play", "body_outfit", "situation"):
+        _v = ct_raw.get(_cat_key)
+        if isinstance(_v, list):
+            _v = _v[0] if _v else ""
+        category_tags[_cat_key] = str(_v or "").strip()
+
     return {
         "ppv_id": ppv_id,
         "filename": filename,
@@ -287,9 +320,10 @@ def _normalize_vault_item(char_id: str, item: Dict[str, Any], index_num: int) ->
         "whale_price_usd": round(float(item.get("whale_price_usd", 19.99)), 2),
         "tags": tags,
         "tags_json": json.dumps(tags, ensure_ascii=False),
-        # [Ticket 4.2] カテゴリ別タグ (play/body_outfit/situation) と汎用おすすめフラグ
+        # [Ticket 4.2/6.2] カテゴリ別タグ (play/body_outfit/situation) と汎用おすすめフラグ
         "is_general": int(item.get("is_general") or 0),
-        "category_tags_json": str(item.get("category_tags_json") or "{}"),
+        "category_tags": category_tags,
+        "category_tags_json": json.dumps(ct_raw, ensure_ascii=False),
         "description_memo": desc_memo,
         "pitch_note": pitch_note,
         "pitch_hint": str(item.get("pitch_hint") or ""),
@@ -574,6 +608,18 @@ def save_settings(char_id: str, new_settings: Dict[str, Any]) -> Dict[str, Any]:
         merged["stage_threshold_explore"] = st_norm["2_Explore"]
         merged["stage_threshold_lead_pitch"] = st_norm["3_Lead_Pitch"]
         save_system_stage_thresholds(thresholds=st_norm)
+    # Discord通知・ステートマシン・DM推論用Ollama（Ticket 5.3）
+    for k in (
+        "discord_webhook_url",
+        "debounce_seconds",
+        "tag_collect_target_count",
+        "tag_collect_max_turns",
+        "cooldown_turns_threshold",
+        "dm_ollama_base_url",
+        "dm_ollama_model_name",
+    ):
+        if k in new_settings:
+            merged[k] = new_settings[k]
     norm = _normalize_settings(merged)
     _write_json(paths["settings"], norm)
     return norm
@@ -610,11 +656,24 @@ def load_vault_items(char_id: str) -> List[Dict[str, Any]]:
             if not norm_it.get("tags") and db_rec.get("tags"):
                 norm_it["tags"] = db_rec["tags"]
                 norm_it["tags_json"] = json.dumps(db_rec["tags"], ensure_ascii=False)
-            # [Ticket 4.2] DB に is_general / category_tags_json が存在する場合は反映
+            # [Ticket 4.2/6.2] DB に is_general / category_tags_json が存在する場合は反映
             if db_rec.get("is_general") is not None:
                 norm_it["is_general"] = int(db_rec.get("is_general") or 0)
             if db_rec.get("category_tags_json"):
                 norm_it["category_tags_json"] = str(db_rec["category_tags_json"])
+                # DB の category_tags_json を反映する際、category_tags dict も再計算して整合を維持
+                try:
+                    _db_ct = json.loads(str(db_rec.get("category_tags_json")))
+                except Exception:
+                    _db_ct = {}
+                if isinstance(_db_ct, dict):
+                    _recomputed: Dict[str, str] = {}
+                    for _cat_key in ("play", "body_outfit", "situation"):
+                        _v = _db_ct.get(_cat_key)
+                        if isinstance(_v, list):
+                            _v = _v[0] if _v else ""
+                        _recomputed[_cat_key] = str(_v or "").strip()
+                    norm_it["category_tags"] = _recomputed
         normalized.append(norm_it)
 
     if normalized:

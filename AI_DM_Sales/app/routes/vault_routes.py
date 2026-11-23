@@ -550,6 +550,103 @@ def api_vault_upload():
     )
 
 
+@vault_bp.route("/api/tags/master", methods=["GET"])
+def api_get_master_tags():
+    """[Ticket 6.2] カテゴリ別マスタータグ3カテゴリ（play / body_outfit / situation）を返却"""
+    from app.services.tag_matcher import load_master_tags
+    data = load_master_tags()
+    categories = data.get("categories", {})
+    # fan_wish はPPVチップUIでは不要なので除外
+    out = {k: v for k, v in categories.items() if k in ("play", "body_outfit", "situation")}
+    return jsonify({"ok": True, "categories": out})
+
+
+@vault_bp.route("/api/tags/master/add", methods=["POST"])
+def api_add_master_tag():
+    """[Ticket 5.1] マスタータグを新規追加する。
+    Body: {"category": "play"|"body_outfit"|"situation", "id": "tag_id", "name_ja": "日本語名", "llm_hint": "LLM分類ヒント"}
+    """
+    import re as _re
+    from app.services.tag_matcher import master_tags_path, load_master_tags
+
+    data = request.get_json(silent=True) or {}
+    category = str(data.get("category") or "").strip().lower()
+    tag_id = str(data.get("id") or data.get("tag_id") or "").strip().lower()
+    name_ja = str(data.get("name_ja") or tag_id).strip() or tag_id
+    llm_hint = str(data.get("llm_hint") or "").strip()
+
+    if category not in ("play", "body_outfit", "situation"):
+        return jsonify({"ok": False, "error": "category must be play, body_outfit, or situation"}), 400
+    if not tag_id or not _re.fullmatch(r"[a-z0-9_]{1,64}", tag_id):
+        return jsonify({"ok": False, "error": "id must match [a-z0-9_]{1,64}"}), 400
+
+    path = master_tags_path()
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            tags_data = json.load(f)
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"cannot read master_tags.json: {e}"}), 500
+
+    cats = tags_data.setdefault("categories", {})
+    cat = cats.setdefault(category, {"name_ja": category, "tags": []})
+    existing_ids = {str(t.get("id") or "").strip() for t in (cat.get("tags") or [])}
+    if tag_id in existing_ids:
+        return jsonify({"ok": False, "error": f"tag id '{tag_id}' already exists in {category}"}), 409
+
+    cat["tags"].append({"id": tag_id, "category": category, "name_ja": name_ja, "llm_hint": llm_hint})
+
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(tags_data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"cannot write master_tags.json: {e}"}), 500
+
+    load_master_tags(refresh=True)
+    return jsonify({"ok": True, "tag_id": tag_id, "category": category, "message": f"タグ '{tag_id}' を {category} に追加しました"})
+
+
+@vault_bp.route("/api/tags/master/delete", methods=["POST"])
+def api_delete_master_tag():
+    """[Ticket 5.1] マスタータグを削除する。
+    Body: {"id": "tag_id"}
+    """
+    from app.services.tag_matcher import master_tags_path, load_master_tags
+
+    data = request.get_json(silent=True) or {}
+    tag_id = str(data.get("id") or data.get("tag_id") or "").strip().lower()
+    if not tag_id:
+        return jsonify({"ok": False, "error": "id is required"}), 400
+
+    path = master_tags_path()
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            tags_data = json.load(f)
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"cannot read master_tags.json: {e}"}), 500
+
+    cats = tags_data.get("categories", {})
+    deleted_category = None
+    for cat_name, cat_data in cats.items():
+        tags_list = cat_data.get("tags") or []
+        new_list = [t for t in tags_list if str(t.get("id") or "").strip().lower() != tag_id]
+        if len(new_list) < len(tags_list):
+            cat_data["tags"] = new_list
+            deleted_category = cat_name
+            break
+
+    if not deleted_category:
+        return jsonify({"ok": False, "error": f"tag id '{tag_id}' not found"}), 404
+
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(tags_data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"cannot write master_tags.json: {e}"}), 500
+
+    load_master_tags(refresh=True)
+    return jsonify({"ok": True, "tag_id": tag_id, "category": deleted_category, "message": f"タグ '{tag_id}' を {deleted_category} から削除しました"})
+
+
 @vault_bp.route("/api/vault/list", methods=["GET"])
 def api_vault_list():
     """
@@ -696,6 +793,40 @@ def api_vault_update():
                 parsed_t = _parse_tags(data["tags"])
                 item["tags"] = parsed_t
                 item["tags_json"] = json.dumps(parsed_t, ensure_ascii=False)
+            # [Ticket 6.2] カテゴリ別タグ ＋ 汎用おすすめフラグの保存
+            if "category_tags" in data and data["category_tags"] is not None:
+                category_tags_raw = data["category_tags"]
+                if isinstance(category_tags_raw, str):
+                    try:
+                        category_tags_raw = json.loads(category_tags_raw)
+                    except Exception:
+                        category_tags_raw = {}
+                if not isinstance(category_tags_raw, dict):
+                    category_tags_raw = {}
+                from app.services.tag_matcher import load_master_tags
+                _valid_ids = set()
+                for _cat in load_master_tags().get("categories", {}).values():
+                    for _t in _cat.get("tags", []):
+                        if _t.get("id"):
+                            _valid_ids.add(str(_t["id"]).strip())
+
+                def _norm_cat_tags(v):
+                    if isinstance(v, list):
+                        return [str(t).strip().lstrip("#") for t in v if str(t).strip() and str(t).strip().lstrip("#") in _valid_ids]
+                    if isinstance(v, str) and v.strip():
+                        t = v.strip().lstrip("#")
+                        return [t] if t in _valid_ids else []
+                    return []
+
+                category_tags = {
+                    "play": _norm_cat_tags(category_tags_raw.get("play")),
+                    "body_outfit": _norm_cat_tags(category_tags_raw.get("body_outfit") or category_tags_raw.get("outfit")),
+                    "situation": _norm_cat_tags(category_tags_raw.get("situation")),
+                }
+                item["category_tags"] = category_tags
+                item["category_tags_json"] = json.dumps(category_tags, ensure_ascii=False)
+            if "is_general" in data and data["is_general"] is not None:
+                item["is_general"] = 1 if str(data["is_general"]).lower() in ("1", "true", "yes") else 0
             if "description_memo" in data or "pitch_note" in data:
                 memo_val = str(
                     data.get("description_memo")
@@ -999,6 +1130,9 @@ def api_settings_get():
     settings = load_settings(char_id)
     sys_delays = get_system_reply_delay_settings()
     sys_stage_thresholds = get_system_stage_thresholds()
+    # [バグ修正] system_settings DB の全キーを取得して system_settings にマージ
+    from app.core.database import get_system_settings
+    db_sys_settings = get_system_settings()
     settings.setdefault("min_reply_delay_sec", sys_delays["min_reply_delay_sec"])
     settings.setdefault("max_reply_delay_sec", sys_delays["max_reply_delay_sec"])
     settings.setdefault("short_msg_chars_threshold", sys_delays["short_msg_chars_threshold"])
@@ -1013,6 +1147,7 @@ def api_settings_get():
         "stage_threshold_icebreak": sys_stage_thresholds["1_Icebreak"],
         "stage_threshold_explore": sys_stage_thresholds["2_Explore"],
         "stage_threshold_lead_pitch": sys_stage_thresholds["3_Lead_Pitch"],
+        **db_sys_settings,
     }
     return jsonify(
         {
@@ -1093,6 +1228,45 @@ def api_settings_save():
         payload["stage_threshold_explore"] = saved_thresh["2_Explore"]
         payload["stage_threshold_lead_pitch"] = saved_thresh["3_Lead_Pitch"]
 
+    # Discord通知・ステートマシン・DM推論用Ollama 設定（Ticket 5.3）
+    new_state_keys = (
+        "discord_webhook_url",
+        "debounce_seconds",
+        "tag_collect_target_count",
+        "tag_collect_max_turns",
+        "cooldown_turns_threshold",
+        "dm_ollama_base_url",
+        "dm_ollama_model_name",
+    )
+    if any(k in data for k in new_state_keys):
+        for k in new_state_keys:
+            if k in data:
+                payload[k] = data[k]
+        # [バグ修正] system_settings DB テーブルにも保存（消費側が DB から読むため）
+        from app.core.database import save_system_setting
+        for k in new_state_keys:
+            if k in data:
+                save_system_setting(k, str(data[k]))
+        # ステートマシン数値の妥当性検証（範囲外はエラー）
+        def _num(val, name):
+            try:
+                return int(float(val))
+            except (TypeError, ValueError):
+                return None
+
+        tgt = _num(data.get("tag_collect_target_count"), "tag_collect_target_count")
+        if tgt is not None and not (1 <= tgt <= 2):
+            return jsonify({"ok": False, "error": "目標タグ収集数は1〜2で指定してください"}), 400
+        for key, lo, hi, label in (
+            ("debounce_seconds", 1, 300, "受信デバウンス待機時間"),
+            ("tag_collect_max_turns", 1, 50, "天井往復数"),
+            ("cooldown_turns_threshold", 1, 50, "クールダウン往復数"),
+        ):
+            if key in data:
+                n = _num(data.get(key), key)
+                if n is None or not (lo <= n <= hi):
+                    return jsonify({"ok": False, "error": f"{label}は{lo}〜{hi}で指定してください"}), 400
+
     target_chars = all_chars if apply_all else [char_id]
     saved_map: Dict[str, Any] = {}
     for cid in target_chars:
@@ -1131,6 +1305,53 @@ def api_settings_save():
             "updated_characters": list(saved_map.keys()),
         }
     )
+
+
+@vault_bp.route("/api/settings/test_discord", methods=["POST"])
+def api_settings_test_discord():
+    """Discord Webhook へのテスト通知送信（Ticket 5.3）。
+
+    リクエストボディの `discord_webhook_url`（または `webhook_url`）を優先し、
+    未指定の場合は保存済みの `discord_webhook_url` を使用する。
+    """
+    data = request.get_json(silent=True) or {}
+    webhook_url = str(
+        data.get("discord_webhook_url") or data.get("webhook_url") or ""
+    ).strip()
+
+    if not webhook_url:
+        # 保存済み設定からフォールバック取得
+        chars = list_character_ids()
+        if chars:
+            webhook_url = str(
+                load_settings(chars[0]).get("discord_webhook_url") or ""
+            ).strip()
+
+    if not webhook_url:
+        return jsonify({"ok": False, "error": "Discord Webhook URLが未設定です"}), 400
+    if not webhook_url.startswith("https://discord.com/api/webhooks/") and not webhook_url.startswith("https://discordapp.com/api/webhooks/"):
+        return jsonify({"ok": False, "error": "無効なWebhook URL形式です（discord.com/api/webhooks/... である必要があります）"}), 400
+
+    try:
+        import requests
+
+        resp = requests.post(
+            webhook_url,
+            json={"content": "✅ AI DM Sales システムのDiscord通知テストです。"},
+            timeout=10,
+        )
+        if resp.status_code in (200, 204):
+            return jsonify({"ok": True, "message": "テスト通知が送信されました"})
+        return jsonify(
+            {
+                "ok": False,
+                "error": f"Webhook送信に失敗しました (HTTP {resp.status_code}: {resp.text[:200]})",
+            }
+        ), 502
+    except requests.exceptions.Timeout:
+        return jsonify({"ok": False, "error": "Webhook送信がタイムアウトしました"}), 504
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Webhook送信エラー: {e}"}), 500
 
 
 @vault_bp.route("/api/vault/media/<char_id>/<path:filename>", methods=["GET"])
