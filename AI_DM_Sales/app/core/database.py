@@ -252,6 +252,15 @@ def init_db(db_path: Optional[str] = None, seed_demo: bool = False) -> str:
             cur.execute("ALTER TABLE ppv_vault ADD COLUMN is_general INTEGER DEFAULT 0;")
         if "category_tags_json" not in pv_cols:
             cur.execute("ALTER TABLE ppv_vault ADD COLUMN category_tags_json TEXT DEFAULT '{}';")
+        # [Visionバッチ] 画像VL精査ステータス: draft=暫定生成(未精査) / refined=VL精査済み
+        if "visual_status" not in pv_cols:
+            cur.execute("ALTER TABLE ppv_vault ADD COLUMN visual_status TEXT DEFAULT 'draft';")
+            # 既存素材は手入力/旧Visionでmemo・pitchが入力済みなので refined として扱う
+            cur.execute(
+                "UPDATE ppv_vault SET visual_status = 'refined' "
+                "WHERE description_memo IS NOT NULL AND TRIM(description_memo) != '' "
+                "AND pitch_hint IS NOT NULL AND TRIM(pitch_hint) != '';"
+            )
 
         # 2.8 system_settings (返信待機時間範囲 min_reply_delay_sec / max_reply_delay_sec 等の共通・システム設定)
         cur.execute(
@@ -2008,6 +2017,10 @@ def upsert_ppv_vault_record(
     # [Ticket 4.6] 汎用フラグ ＋ カテゴリ別タグ
     is_general = 1 if int(item.get("is_general") or 0) == 1 else 0
     category_tags_json = str(item.get("category_tags_json") or "{}")
+    # [Visionバッチ] 画像VL精査ステータス（draft/refined）。未指定ならdraft
+    visual_status = str(item.get("visual_status") or "draft").strip().lower()
+    if visual_status not in ("draft", "refined"):
+        visual_status = "draft"
 
     conn = get_db_connection(db_path)
     try:
@@ -2017,9 +2030,9 @@ def upsert_ppv_vault_record(
                 ppv_id, char_id, filename, media_type, ladder_step,
                 base_price_usd, tripwire_price_usd, whale_price_usd,
                 tags_json, description_memo, pitch_note, pitch_hint,
-                is_general, category_tags_json,
+                is_general, category_tags_json, visual_status,
                 is_active, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(char_id, ppv_id) DO UPDATE SET
                 filename = excluded.filename,
                 media_type = excluded.media_type,
@@ -2033,6 +2046,7 @@ def upsert_ppv_vault_record(
                 pitch_hint = excluded.pitch_hint,
                 is_general = excluded.is_general,
                 category_tags_json = excluded.category_tags_json,
+                visual_status = excluded.visual_status,
                 is_active = excluded.is_active,
                 updated_at = excluded.updated_at;
             """,
@@ -2040,7 +2054,7 @@ def upsert_ppv_vault_record(
                 ppv_id, char_id, filename, media_type, ladder_step,
                 base_price, tripwire_price, whale_price,
                 tags_json_str, desc_memo, pitch_note, pitch_hint,
-                is_general, category_tags_json,
+                is_general, category_tags_json, visual_status,
                 is_active, created_at, now_str,
             ),
         )
@@ -2069,10 +2083,14 @@ def upsert_ppv_vault_record(
         "description_memo": desc_memo,
         "pitch_note": pitch_note,
         "pitch_hint": pitch_hint,
+        "is_general": is_general,
+        "visual_status": visual_status,
         "is_active": bool(is_active),
         "created_at": created_at,
         "updated_at": now_str,
     }
+
+
 def sync_ppv_vault_items_db(
     char_id: str,
     items: List[Dict[str, Any]],

@@ -327,6 +327,8 @@ def _normalize_vault_item(char_id: str, item: Dict[str, Any], index_num: int) ->
         "description_memo": desc_memo,
         "pitch_note": pitch_note,
         "pitch_hint": str(item.get("pitch_hint") or ""),
+        # [Visionバッチ] 画像VL精査ステータス（draft/refined）
+        "visual_status": str(item.get("visual_status") or "draft"),
         "is_active": is_active,
         "is_redacted": is_redacted,
         "redact_status": redact_status,
@@ -674,6 +676,9 @@ def load_vault_items(char_id: str) -> List[Dict[str, Any]]:
                             _v = _v[0] if _v else ""
                         _recomputed[_cat_key] = str(_v or "").strip()
                     norm_it["category_tags"] = _recomputed
+            # [Visionバッチ] DB の visual_status を反映（draft/refined）
+            if db_rec.get("visual_status"):
+                norm_it["visual_status"] = str(db_rec["visual_status"]).strip().lower()
         normalized.append(norm_it)
 
     if normalized:

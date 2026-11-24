@@ -10,9 +10,9 @@
       --bg-dark: #0b0914;
       --bg-panel: #131022;
       --bg-card: #1b1630;
-      --bg-input: #0f0c1d;
+      --bg-input: #151228;
       --border: #2e264d;
-      --border-light: #43386b;
+      --border-light: #5a4d8a;
       --accent: #a855f7;
       --accent-hover: #9333ea;
       --accent-soft: rgba(168, 85, 247, 0.16);
@@ -45,7 +45,7 @@
       align-items: center;
       justify-content: space-between;
       flex-wrap: wrap;
-      gap: 6px 10px;
+      gap: 4px 10px;
       flex-shrink: 0;
       z-index: 100;
     }
@@ -56,6 +56,9 @@
       flex-wrap: wrap;
       min-width: 0;
     }
+    .header-left { flex-shrink: 1; }
+    .header-center { flex: 1; min-width: 0; }
+    .header-right { flex-shrink: 0; }
     .brand-title {
       display: flex;
       align-items: center;
@@ -203,23 +206,25 @@
 
     .nav-tabs {
       display: flex;
-      flex-wrap: wrap;
-      gap: 3px;
+      gap: 2px;
       background: #0c0917;
       padding: 3px;
       border-radius: 8px;
       border: 1px solid var(--border);
+      min-width: 0;
+      overflow-x: auto;
     }
     .tab-btn {
       background: transparent;
       border: none;
       color: var(--text-muted);
-      padding: 5px 10px;
+      padding: 4px 9px;
       border-radius: 6px;
-      font-size: 11.5px;
+      font-size: 11px;
       font-weight: 700;
       cursor: pointer;
       white-space: nowrap;
+      flex-shrink: 0;
     }
     .tab-btn:hover { color: var(--text-main); }
     .tab-btn.active { background: var(--accent); color: #ffffff; }
@@ -245,24 +250,24 @@
     /* タブ1：営業モニタリング（コンパクト＆レスポンシブ売上サマリー） */
     .summary-cards-row {
       display: grid;
-      grid-template-columns: repeat(6, minmax(0, 1fr));
-      gap: 8px;
+      grid-template-columns: repeat(7, minmax(0, 1fr));
+      gap: 6px;
       flex-shrink: 0;
     }
     .stat-card {
       background: var(--bg-panel);
       border: 1px solid var(--border);
       border-radius: 8px;
-      padding: 7px 10px;
+      padding: 6px 8px;
       display: flex;
       flex-direction: column;
       justify-content: center;
       gap: 2px;
       min-width: 0;
     }
-    .stat-label { font-size: 10.5px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .stat-value { font-size: 16px; font-weight: 800; color: #fff; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .stat-sub { font-size: 10px; color: #a78bfa; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .stat-label { font-size: 10px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .stat-value { font-size: 15px; font-weight: 800; color: #fff; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .stat-sub { font-size: 9.5px; color: #a78bfa; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     /* TICKET-09: 未返信件数カード（クリックで絞り込みトグル） */
     .stat-card.unanswered-card { cursor: pointer; transition: border-color .15s ease, box-shadow .15s ease; }
     .stat-card.unanswered-card:hover { border-color: rgba(236, 72, 153, 0.55); }
@@ -613,7 +618,13 @@
       transition: border-color 0.15s ease, box-shadow 0.15s ease;
     }
     .vault-card:hover { border-color: var(--border-light); }
-    .vault-card.inactive { opacity: 0.55; }
+    /* 非公開時: カード全体を暗くするが、未加工ロックのバッジ・加工ボタンは除外して目立たせる */
+    .vault-card.inactive .vault-thumb-wrap > img,
+    .vault-card.inactive .vault-thumb-wrap > video { opacity: 0.55; filter: grayscale(0.4); }
+    .vault-card.inactive .vault-card-body { opacity: 0.55; }
+    /* バッジと加工ボタンは常に通常明るさ */
+    .vault-card.inactive .vault-thumb-overlay { opacity: 1; }
+    .vault-card.inactive .vault-redact-btn { opacity: 1; }
     .tag-chip {
       display: inline-flex; align-items: center; gap: 4px;
       padding: 4px 9px; border-radius: 999px; font-size: 11px; font-weight: 700;
@@ -628,7 +639,7 @@
     .tag-chip:disabled { opacity: 0.45; cursor: not-allowed; }
     .cat-tag-section {
       display: flex; flex-direction: column; gap: 5px;
-      background: #100b1c; border: 1px solid var(--border);
+      background: #1a1635; border: 1px solid var(--border);
       border-radius: 8px; padding: 7px 9px;
     }
     .cat-tag-section .cat-label {
@@ -1318,23 +1329,44 @@
     mark.manual-hl { background: rgba(250, 204, 21, 0.35); color: #fef08a; padding: 0 2px; border-radius: 3px; }
 
     @media (max-width: 1260px) {
-      .summary-cards-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .summary-cards-row { grid-template-columns: repeat(4, minmax(0, 1fr)); }
       .timeline-2pane { grid-template-columns: 270px 1fr; }
       .right-split { grid-template-columns: 1fr 255px; }
       .vault-grid { grid-template-columns: repeat(auto-fill, minmax(470px, 1fr)); }
+      .header-left { flex-wrap: nowrap; }
+      .brand-title { font-size: 13px; }
+      #masterBotBtn { font-size: 11px; padding: 4px 9px; }
+      .char-menu-trigger { max-width: 200px; }
     }
     @media (max-width: 980px) {
       body { overflow-y: auto; height: auto; min-height: 100vh; }
       main.main-workspace, .tab-pane { overflow: visible; }
-      .header-center { order: 3; width: 100%; justify-content: flex-start; }
-      .nav-tabs { width: 100%; overflow-x: auto; flex-wrap: nowrap; }
-      .summary-cards-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      header.top-header { padding: 5px 10px; gap: 3px 8px; }
+      .header-left { flex-wrap: nowrap; }
+      .brand-title { font-size: 12.5px; }
+      #masterBotBtn { font-size: 10.5px; padding: 4px 8px; }
+      .char-menu-trigger { font-size: 11px; padding: 4px 8px; max-width: 180px; }
+      .header-center { order: 3; width: 100%; }
+      .nav-tabs { width: 100%; overflow-x: auto; flex-wrap: nowrap; gap: 2px; }
+      .tab-btn { padding: 4px 8px; font-size: 11px; }
+      .header-right { flex-wrap: nowrap; }
+      .monitor-indicator { font-size: 10px; padding: 3px 8px; }
+      .header-right .btn { font-size: 10.5px; padding: 4px 8px; }
+      .summary-cards-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
       .timeline-2pane { grid-template-columns: 1fr; grid-template-rows: auto; min-height: 680px; }
       .pane-left { max-height: 240px; }
       .right-split, .split-2col { grid-template-columns: 1fr; grid-template-rows: auto; }
       .chat-column { border-right: none; border-bottom: 1px solid var(--border); min-height: 360px; }
     }
     @media (max-width: 680px) {
+      header.top-header { padding: 4px 8px; gap: 3px 6px; }
+      .brand-title { font-size: 12px; }
+      #masterBotBtn { font-size: 10px; padding: 3px 6px; }
+      .char-menu-trigger { font-size: 10px; padding: 3px 6px; max-width: 140px; }
+      .header-center { order: 3; width: 100%; }
+      .header-right { width: 100%; justify-content: flex-end; }
+      .monitor-indicator { font-size: 10px; padding: 2px 6px; }
+      .header-right .btn { font-size: 10px; padding: 3px 6px; }
       .vault-grid { grid-template-columns: 1fr; }
       .vault-card { grid-template-columns: 1fr; min-height: 0; }
       .vault-thumb-wrap {
@@ -1374,13 +1406,14 @@
       display: flex; align-items: center; justify-content: center;
       min-width: 0; overflow: hidden;
     }
-    .redact-canvas-wrap { position: relative; }
+    .redact-canvas-wrap { position: relative; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
     .redact-canvas-wrap img, .redact-canvas-wrap video {
       max-width: 100%; max-height: 100%; display: block;
+      object-fit: contain;
       user-select: none; -webkit-user-drag: none;
     }
     #redactCanvas {
-      position: absolute; inset: 0;
+      position: absolute;
       cursor: crosshair; touch-action: none;
     }
     .redact-side-pane {
@@ -1541,6 +1574,11 @@
           <span class="stat-value" id="statActiveFans">0</span>
           <span class="stat-sub" id="statTotalFans">全スレッド: 0</span>
         </div>
+        <div class="stat-card unanswered-card" id="unansweredCard" onclick="toggleUnansweredFilter()" title="クリックで「未返信のみ」に絞り込みを切り替え">
+          <span class="stat-label">📩 未返信件数</span>
+          <span class="stat-value" id="statUnanswered" style="color:#f9a8d4;">0</span>
+          <span class="stat-sub" id="statUnansweredSub">クリックで絞り込み</span>
+        </div>
         <div class="stat-card">
           <span class="stat-label">🔋 省エネ降格顧客</span>
           <span class="stat-value" id="statLowPrio">0</span>
@@ -1555,11 +1593,6 @@
           <span class="stat-label">🤖 稼働ステータス</span>
           <span class="stat-value" id="statBotState" style="font-size:15px;">待機中</span>
           <span class="stat-sub" id="statSleepInfo">睡眠制御: OFF (19:00-22:00)</span>
-        </div>
-        <div class="stat-card unanswered-card" id="unansweredCard" onclick="toggleUnansweredFilter()" title="クリックで「未返信のみ」に絞り込みを切り替え">
-          <span class="stat-label">📩 未返信件数</span>
-          <span class="stat-value" id="statUnanswered" style="color:#f9a8d4;">0</span>
-          <span class="stat-sub" id="statUnansweredSub">クリックで絞り込み</span>
         </div>
       </div>
 
@@ -1585,6 +1618,7 @@
               <option value="escalated">要介入</option>
               <option value="manual">手動保留中</option>
               <option value="low">省エネ</option>
+              <option value="muted">🔇 ミュート中</option>
             </select>
             <span class="tfb-label">キャラ</span>
             <select id="threadCharSelect" onchange="setThreadCharFilter(this.value)"></select>
@@ -1639,13 +1673,13 @@
                 </div>
                 <div class="manual-ppv-bar">
                   <span style="color:#f9a8d4; font-weight:700; white-space:nowrap;">💎 手動PPV送信:</span>
+                  <button class="btn btn-sm" style="background:rgba(168,85,247,0.15); border-color:rgba(168,85,247,0.4); color:#e9d5ff; white-space:nowrap;" onclick="openManualPpvPickerModal()">
+                    🔎 <span id="manualPpvPickerBtnLabel">PPV素材選択</span>
+                  </button>
                   <div id="manualPpvMiniThumb" class="manual-ppv-mini-thumb" title="クリックで拡大プレビュー"></div>
-                  <select id="manualPpvSelect" class="select-ctrl" style="flex:1; min-width:170px; padding:4px 8px; font-size:11px;" onchange="onManualPpvSelectChange()">
-                    <option value="">（PPV添付なし・テキストのみ送信）</option>
-                  </select>
-                  <select id="manualPpvPresetSelect" class="select-ctrl" style="width:172px; padding:4px 6px; font-size:11px; display:none;" onchange="onManualPpvPresetChange()"></select>
+                  <span id="manualSelectedPpvLabel" style="font-size:10.5px; color:#e9d5ff; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0;"></span>
                   <input type="number" step="0.01" min="0" id="manualPpvPriceInput" class="input-ctrl" style="width:86px; padding:4px 7px; font-size:11px;" placeholder="価格($)">
-                  <span id="manualSelectedPpvJumpWrap" style="font-size:10.5px;"></span>
+                  <button class="btn btn-sm" id="manualPpvClearBtn" style="display:none; background:rgba(220,38,38,0.12); border-color:rgba(220,38,38,0.45); color:#fecaca;" onclick="clearManualPpvSelection()">✕ 解除</button>
                 </div>
               </div>
             </div>
@@ -1708,6 +1742,13 @@
             <option value="purchases_desc">購入回数順 (purchases_desc)</option>
             <option value="revenue_desc">売上金額高い順 (revenue_desc)</option>
           </select>
+        </div>
+
+        <div class="filter-group" style="margin-left:auto;">
+          <button class="btn btn-sm" id="batchRefineBtn" onclick="batchVisionRefine()"
+            style="background:rgba(168,85,247,0.15); border-color:rgba(168,85,247,0.4); color:#e9d5ff;">
+            🔍 <span id="batchRefineCount">未精査</span> を一括精査
+          </button>
         </div>
       </div>
 
@@ -2354,6 +2395,53 @@
     </div>
   </div>
 
+  <!-- 手動PPV送信用：PPV素材選択モーダル（PPV武器庫画面と同じソート・検索・フィルタ） -->
+  <div id="manualPpvPickerModal" class="modal-backdrop" onclick="handleBackdropClose(event, 'manualPpvPickerModal', closeManualPpvPickerModal)">
+    <div class="modal-card" style="max-width:880px; width:96%;" onclick="event.stopPropagation()">
+      <div class="modal-header" style="gap:10px; flex-wrap:wrap;">
+        <span style="font-size:13.5px; font-weight:800; color:#e9d5ff;">💎 PPV素材を選択（手動PPV添付）</span>
+        <div style="display:flex; align-items:center; gap:6px; flex:1; max-width:400px; min-width:180px;">
+          <input type="text" id="ppvPickerSearchInput" class="input-ctrl" placeholder="🔍 検索（ファイル名 / PPV ID / タグ）" oninput="onManualPpvPickerSearch()" style="width:100%;">
+          <span id="ppvPickerSearchCount" style="font-size:11px; color:var(--text-muted); white-space:nowrap;"></span>
+        </div>
+        <button class="btn btn-sm" onclick="closeManualPpvPickerModal()">✕ 閉じる (ESC)</button>
+      </div>
+
+      <div class="vault-toolbar" style="padding:10px 16px 0;">
+        <div class="filter-group">
+          <span style="font-size:12px; font-weight:700; color:var(--text-muted);">階段レベル:</span>
+          <button class="pill-btn active" data-ppvstep="all" onclick="setPpvPickerStepFilter('all')">すべて</button>
+          <button class="pill-btn" data-ppvstep="1" onclick="setPpvPickerStepFilter('1')">Step 1: 導入</button>
+          <button class="pill-btn" data-ppvstep="2" onclick="setPpvPickerStepFilter('2')">Step 2: 本命</button>
+          <button class="pill-btn" data-ppvstep="3" onclick="setPpvPickerStepFilter('3')">Step 3: 超秘蔵</button>
+        </div>
+        <div class="filter-group">
+          <span style="font-size:12px; font-weight:700; color:var(--text-muted);">種別:</span>
+          <button class="pill-btn active" data-ppvmedia="all" onclick="setPpvPickerMediaFilter('all')">すべて</button>
+          <button class="pill-btn" data-ppvmedia="video" onclick="setPpvPickerMediaFilter('video')">🎬 動画</button>
+          <button class="pill-btn" data-ppvmedia="image" onclick="setPpvPickerMediaFilter('image')">🖼️ 画像</button>
+        </div>
+        <div class="filter-group">
+          <span style="font-size:12px; font-weight:700; color:var(--text-muted);">ソート:</span>
+          <select id="ppvPickerSortSelect" class="select-ctrl" style="width:200px;" onchange="renderManualPpvPickerGrid()">
+            <option value="newest">登録日新しい順 (newest)</option>
+            <option value="oldest">登録日古い順 (oldest)</option>
+            <option value="offers_desc">提案回数順 (offers_desc)</option>
+            <option value="purchases_desc">購入回数順 (purchases_desc)</option>
+            <option value="revenue_desc">売上金額高い順 (revenue_desc)</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="ppvPickerGrid" class="vault-grid" style="padding:12px 16px; max-height:60vh; overflow-y:auto;"></div>
+
+      <div class="modal-footer" style="gap:8px;">
+        <span style="font-size:11.5px; color:var(--text-muted);">💡 このファンのAI推奨モード: <span id="ppvPickerRecPrice" style="color:#4ade80; font-weight:700;">-</span></span>
+        <button class="btn btn-primary" style="margin-left:auto;" onclick="confirmManualPpvSelection()">✅ この素材で送信する</button>
+      </div>
+    </div>
+  </div>
+
   <div id="ppvHoverFloatingCard" class="ppv-hover-tooltip"></div>
   <div id="toastBar" class="toast-bar"></div>
 
@@ -2392,10 +2480,19 @@
       threadSort: "unanswered",
     };
 
-    function showToast(msg) {
+    function showToast(msg, isError = false) {
       const bar = document.getElementById("toastBar");
       bar.textContent = msg;
       bar.style.display = "block";
+      if (isError) {
+        bar.style.background = "linear-gradient(90deg,#7f1d1d,#9f1239)";
+        bar.style.borderColor = "#f87171";
+        bar.style.color = "#fecaca";
+      } else {
+        bar.style.background = "";
+        bar.style.borderColor = "";
+        bar.style.color = "";
+      }
       clearTimeout(window._toastTimer);
       window._toastTimer = setTimeout(() => { bar.style.display = "none"; }, 3200);
     }
@@ -2440,6 +2537,9 @@
     });
 
     async function initApp() {
+      // 前セッションの残骸（refineModal等）を掃除
+      const stale = document.getElementById("refineModal");
+      if (stale) stale.remove();
       await Promise.all([
         fetchSystemState(),
         loadStageThresholdsFromApi(),
@@ -2664,6 +2764,7 @@
       state.isPollingInFlight = true;
       try {
         const params = new URLSearchParams({ char_id: state.selectedCharId });
+        if (state.threadFilter === "muted") params.set("include_muted", "true");
         if (state.activeThread) {
           params.set("active_char_id", state.activeThread.char_id);
           params.set("active_fan_id", state.activeThread.fan_id);
@@ -2894,7 +2995,8 @@
        タブ1：営業モニタリング（2ペイン＆アラート制御）
     ========================================== */
     async function refreshMonitoring() {
-      const res = await fetch(`/api/monitoring/overview?char_id=${encodeURIComponent(state.selectedCharId)}`);
+      const mutedParam = state.threadFilter === "muted" ? "&include_muted=true" : "";
+      const res = await fetch(`/api/monitoring/overview?char_id=${encodeURIComponent(state.selectedCharId)}${mutedParam}`);
       const data = await res.json();
       if (data.ok) {
         renderMonitoringData(data.summary, data.alerts, data.threads);
@@ -3006,6 +3108,7 @@
           case "escalated": return !!t.is_escalated;
           case "manual": return !!(t.manual_hold || t.is_manual_overdue);
           case "low": return !!t.is_low_priority;
+          case "muted": return !!t.is_muted;
           default: return true;
         }
       });
@@ -3023,7 +3126,7 @@
 
       const newThreadsSig = JSON.stringify(filtered.map(t => [
         t.char_id, t.fan_id, t.last_message_content, t.last_message_sender, t.sales_phase,
-        t.total_spent_usd, t.is_escalated, t.is_low_priority, t.manual_hold, t.is_manual_overdue,
+        t.total_spent_usd, t.is_escalated, t.is_low_priority, t.manual_hold, t.is_manual_overdue, t.is_muted,
         t.pending_reply ? t.pending_reply.remaining_seconds : -1,
         state.threadFilter, state.threadCharFilter, state.threadSort,
         state.activeThread ? `${state.activeThread.char_id}:${state.activeThread.fan_id}` : ""
@@ -3044,6 +3147,7 @@
             ? `<span class="badge" style="background:rgba(236,72,153,0.22);color:#fbcfe8;border-color:rgba(236,72,153,0.45);">📩 未返信</span>`
             : "";
           const lowBadge = t.is_low_priority ? `<span class="badge badge-low">🔋 省エネ</span>` : "";
+          const mutedBadge = t.is_muted ? `<span class="badge" style="background:rgba(100,116,139,0.22);color:#94a3b8;border-color:rgba(100,116,139,0.45);">🔇 永久ミュート中</span>` : "";
           const spentStr = `$${Number(t.total_spent_usd || 0).toFixed(2)}`;
           return `
             <div class="thread-card ${isCurrent ? 'active' : ''} ${t.is_manual_overdue ? 'overdue-card' : ''}" onclick="openThread('${escapeHtml(t.char_id)}', '${escapeHtml(t.fan_id)}')">
@@ -3055,8 +3159,9 @@
                 <span class="badge badge-char">${escapeHtml(t.char_id)}</span>
                 <span class="badge badge-tier">${escapeHtml(t.current_tier)}</span>
                 <span class="badge badge-phase">${escapeHtml(t.sales_phase)}</span>
-                ${overdueBadge}${waitBadge}${unreadDot}${alertBadge}${lowBadge}
+                ${overdueBadge}${waitBadge}${unreadDot}${alertBadge}${lowBadge}${mutedBadge}
               </div>
+              ${t.is_muted ? `<div style="padding:0 10px 8px;"><button class="btn btn-sm btn-success" style="width:100%;" onclick="event.stopPropagation();unmuteFan('${escapeHtml(t.char_id)}','${escapeHtml(t.fan_id)}')">🔊 ミュート解除</button></div>` : ""}
               <div class="thread-preview">
                 ${escapeHtml(t.last_message_content || '(メッセージなし)')}
               </div>
@@ -3088,6 +3193,8 @@
         state.lastProfileSig = "";
         state.lastDecisionSig = "";
         state.lastTxsSig = "";
+        // スレッド切り替え時のみPPV選択・価格をリセット（ポーリング時の再読み込みでは保持）
+        clearManualPpvSelection();
       }
       document.querySelectorAll(".thread-card").forEach(el => {
         el.classList.toggle("active", el.getAttribute("onclick")?.includes(`'${charId}', '${fanId}'`));
@@ -3379,7 +3486,6 @@
       `;
 
       renderReplyStatusBanner(fan, pendingReply);
-      ensureManualPpvOptionsLoaded(charId, fanId);
 
       const chatBox = document.getElementById("chatMessagesBox");
       const msgsSig = JSON.stringify(msgs.map(m => [
@@ -3511,97 +3617,203 @@
       }
     }
 
-    async function ensureManualPpvOptionsLoaded(charId, fanId = "") {
-      if (!charId) return;
-      const cacheKey = `${charId}::${fanId || ''}`;
-      if (state.lastManualPpvCharId === cacheKey) return;
-      state.lastManualPpvCharId = cacheKey;
-      try {
-        const params = new URLSearchParams({ char_id: charId, fan_id: fanId || "" });
-        const res = await fetch(`/api/monitoring/ppv_candidates?${params.toString()}`);
-        const data = await res.json();
-        if (!data.ok) return;
-        const activeItems = data.items || [];
-        state.vaultCacheByChar[charId] = activeItems;
-        state.manualPpvCandidatesMap = {};
-        activeItems.forEach(it => { state.manualPpvCandidatesMap[it.ppv_id] = it; });
+    /* ==========================================
+       手動PPV送信：PPV素材選択モーダル（PPV武器庫画面と同じソート・検索・フィルタ）
+       選択済み素材は state.manualPpvSelectedItem に保持し、送信時に ppv_id / filename / 価格 を渡す
+    ========================================== */
+    let state_ppvPickerFilter = { step: "all", media: "all", keyword: "" };
 
-        const sel = document.getElementById("manualPpvSelect");
-        if (!sel) return;
-        const prevVal = sel.value;
-        sel.innerHTML = `<option value="">（PPV添付なし・テキストのみ送信）</option>` +
-          activeItems.map(it => {
-            const fname = it.filename || it.ppv_id;
-            const unlockedTag = it.already_unlocked ? " [購入済]" : "";
-            const recPrice = Number(it.recommended_price_usd || it.base_price_usd || 9.99).toFixed(2);
-            return `<option value="${escapeHtml(it.ppv_id)}">[${escapeHtml(it.step_label)}] ${escapeHtml(fname)} (推奨 $${recPrice})${unlockedTag}</option>`;
-          }).join("");
-        if (prevVal && state.manualPpvCandidatesMap[prevVal]) sel.value = prevVal;
-        onManualPpvSelectChange();
-      } catch (e) {}
+    async function openManualPpvPickerModal() {
+      if (!state.activeThread) {
+        showToast("⚠️ 左ペインから送信先のスレッドを選択してください");
+        return;
+      }
+      const modal = document.getElementById("manualPpvPickerModal");
+      if (!modal) return;
+      const grid = document.getElementById("ppvPickerGrid");
+      if (grid) grid.innerHTML = `<div style="grid-column:1/-1; text-align:center; padding:36px; color:var(--text-muted);">読み込み中...</div>`;
+
+      // フィルタ・検索・ソートを初期状態にリセット
+      state_ppvPickerFilter = { step: "all", media: "all", keyword: "" };
+      const searchInput = document.getElementById("ppvPickerSearchInput");
+      if (searchInput) searchInput.value = "";
+      const sortSel = document.getElementById("ppvPickerSortSelect");
+      if (sortSel) sortSel.value = "newest";
+      document.querySelectorAll("[data-ppvstep]").forEach(b => b.classList.toggle("active", b.dataset.ppvstep === "all"));
+      document.querySelectorAll("[data-ppvmedia]").forEach(b => b.classList.toggle("active", b.dataset.ppvmedia === "all"));
+
+      modal.classList.add("open");
+
+      const charId = state.activeThread.char_id;
+      const fanId = state.activeThread.fan_id || "";
+      const params = new URLSearchParams({ char_id: charId, fan_id: fanId || "" });
+      const res = await fetch(`/api/monitoring/ppv_candidates?${params.toString()}`);
+      const data = await res.json();
+      if (!data.ok) {
+        if (grid) grid.innerHTML = `<div style="grid-column:1/-1; text-align:center; padding:36px; color:#f87171;">PPV候補の読み込みに失敗しました。</div>`;
+        return;
+      }
+      state.manualPpvCandidatesMap = {};
+      (data.items || []).forEach(it => { state.manualPpvCandidatesMap[it.ppv_id] = it; });
+      const recLabel = document.getElementById("ppvPickerRecPrice");
+      if (recLabel) {
+        recLabel.textContent = data.recommended_mode_label_ja || "";
+      }
+      renderManualPpvPickerGrid();
     }
 
-    function onManualPpvSelectChange() {
-      const sel = document.getElementById("manualPpvSelect");
-      const presetSel = document.getElementById("manualPpvPresetSelect");
-      const priceInput = document.getElementById("manualPpvPriceInput");
-      const thumbBox = document.getElementById("manualPpvMiniThumb");
-      const jumpWrap = document.getElementById("manualSelectedPpvJumpWrap");
-      if (!sel || !priceInput || !jumpWrap) return;
+    function closeManualPpvPickerModal() {
+      const modal = document.getElementById("manualPpvPickerModal");
+      if (modal) modal.classList.remove("open");
+    }
 
-      const ppvId = sel.value;
-      const item = (state.manualPpvCandidatesMap || {})[ppvId];
-      if (!ppvId || !item) {
-        priceInput.value = "";
-        if (presetSel) { presetSel.style.display = "none"; presetSel.innerHTML = ""; }
-        if (thumbBox) { thumbBox.style.display = "none"; thumbBox.innerHTML = ""; }
-        jumpWrap.innerHTML = "";
+    function setPpvPickerStepFilter(step) {
+      state_ppvPickerFilter.step = step;
+      document.querySelectorAll("[data-ppvstep]").forEach(b => b.classList.toggle("active", b.dataset.ppvstep === step));
+      renderManualPpvPickerGrid();
+    }
+
+    function setPpvPickerMediaFilter(media) {
+      state_ppvPickerFilter.media = media;
+      document.querySelectorAll("[data-ppvmedia]").forEach(b => b.classList.toggle("active", b.dataset.ppvmedia === media));
+      renderManualPpvPickerGrid();
+    }
+
+    function onManualPpvPickerSearch() {
+      const input = document.getElementById("ppvPickerSearchInput");
+      state_ppvPickerFilter.keyword = input ? input.value.trim().toLowerCase() : "";
+      renderManualPpvPickerGrid();
+    }
+
+    function renderManualPpvPickerGrid() {
+      const grid = document.getElementById("ppvPickerGrid");
+      if (!grid) return;
+      const items = Object.values(state.manualPpvCandidatesMap || {});
+
+      // フィルタ適用（階段・種別・キーワード）
+      let filtered = items.filter(it => {
+        if (state_ppvPickerFilter.step !== "all" && String(it.ladder_step) !== state_ppvPickerFilter.step) return false;
+        if (state_ppvPickerFilter.media !== "all" && it.media_type !== state_ppvPickerFilter.media) return false;
+        if (state_ppvPickerFilter.keyword) {
+          const hay = `${it.ppv_id} ${it.filename} ${(Array.isArray(it.tags) ? it.tags.join(" ") : "")} ${it.step_label || ""}`.toLowerCase();
+          if (!hay.includes(state_ppvPickerFilter.keyword)) return false;
+        }
+        return true;
+      });
+
+      // ソート（PPV武器庫画面と同一の5種キー）
+      const sortVal = (document.getElementById("ppvPickerSortSelect") || { value: "newest" }).value;
+      const byKey = (fn) => filtered.sort(fn);
+      if (sortVal === "oldest") byKey((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
+      else if (sortVal === "offers_desc") byKey((a, b) => (b.offers_count || 0) - (a.offers_count || 0));
+      else if (sortVal === "purchases_desc") byKey((a, b) => (b.purchases_count || 0) - (a.purchases_count || 0));
+      else if (sortVal === "revenue_desc") byKey((a, b) => (b.revenue_usd || 0) - (a.revenue_usd || 0));
+      else byKey((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+
+      const countEl = document.getElementById("ppvPickerSearchCount");
+      if (countEl) countEl.textContent = `${filtered.length} / ${items.length} 件`;
+
+      if (filtered.length === 0) {
+        grid.innerHTML = `<div style="grid-column:1/-1; text-align:center; padding:40px; color:var(--text-muted); font-size:13px;">
+          該当するPPV素材がありません。検索条件・フィルタを変更してください。</div>`;
         return;
       }
 
-      const charId = item.char_id || (state.activeThread ? state.activeThread.char_id : getEffectiveCharId());
-      const fname = item.filename || ppvId;
-      const mediaUrl = item.media_url || `/api/vault/media/${encodeURIComponent(charId)}/${encodeURIComponent(fname)}`;
-      const isVid = item.media_type === "video" && item.file_exists !== false;
+      const selectedPpvId = (state.manualPpvSelectedItem || {}).ppv_id || "";
+      grid.innerHTML = filtered.map(it => {
+        const fname = it.filename || it.ppv_id;
+        const mediaUrl = it.media_url || "";
+        const isVid = it.media_type === "video" && it.file_exists !== false;
+        const isUnlocked = it.already_unlocked === true;
+        const recPrice = Number(it.recommended_price_usd || it.base_price_usd || 9.99).toFixed(2);
+        const stepBadgeClass = it.ladder_step === 1 ? "badge-char" : (it.ladder_step === 2 ? "badge-phase" : "badge-tier");
+        const mediaTypeLabel = it.media_type === "video" ? "🎬 動画" : "🖼️ 画像";
+        const isSelected = it.ppv_id === selectedPpvId;
+        const thumbMediaHtml = isVid
+          ? `<video src="${escapeHtml(mediaUrl)}#t=0.1" preload="metadata" muted playsinline></video>`
+          : `<img src="${escapeHtml(mediaUrl)}" alt="${escapeHtml(fname)}" loading="lazy">`;
 
+        return `
+          <div class="vault-card ${isSelected ? 'active' : ''}" style="${isSelected ? 'border-color:#a855f7; box-shadow:0 0 0 2px rgba(168,85,247,0.4);' : ''} cursor:pointer;"
+               onclick="selectManualPpvItem('${escapeHtml(it.ppv_id)}')">
+            <div class="vault-thumb-wrap" onclick="event.stopPropagation(); openMediaLightbox('${escapeHtml(mediaUrl)}', '${escapeHtml(it.media_type)}', ${it.file_exists !== false}, '${escapeHtml(fname)} (${escapeHtml(it.step_label)})')">
+              ${thumbMediaHtml}
+              <div class="vault-thumb-overlay">
+                <span class="badge ${stepBadgeClass}">${escapeHtml(it.step_label)}</span>
+                <span class="badge badge-low">${mediaTypeLabel}</span>
+                ${isUnlocked ? `<span class="badge" style="background:rgba(8,6,14,.82); color:#4ade80; border-color:rgba(74,222,128,.4);">✅ 購入済</span>` : ''}
+              </div>
+            </div>
+            <div class="vault-card-body">
+              <strong style="font-size:11.5px; color:#e9d5ff; display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(fname)}">
+                ${escapeHtml(it.ppv_id)}
+              </strong>
+              <div style="font-size:10.5px; color:var(--text-muted); margin-top:2px;">${escapeHtml(fname)}</div>
+              <div style="display:flex; align-items:center; gap:8px; margin-top:6px;">
+                <span style="font-size:11px; color:#4ade80; font-weight:800;">🎯 推奨 $${recPrice}</span>
+                <span style="font-size:10.5px; color:var(--text-muted);">🏷️ ${Number(it.tripwire_price_usd || 5.99).toFixed(2)} / 💎 ${Number(it.base_price_usd || 9.99).toFixed(2)} / 👑 ${Number(it.whale_price_usd || 19.99).toFixed(2)}</span>
+              </div>
+              ${isSelected ? `<div style="margin-top:6px; font-size:11px; color:#a855f7; font-weight:700;">✅ 選択中</div>` : ''}
+            </div>
+          </div>`;
+      }).join("");
+    }
+
+    function selectManualPpvItem(ppvId) {
+      const item = (state.manualPpvCandidatesMap || {})[ppvId];
+      if (!item) return;
+      state.manualPpvSelectedItem = item;
+
+      // 価格欄を推奨価格に自動設定
+      const priceInput = document.getElementById("manualPpvPriceInput");
+      if (priceInput) priceInput.value = Number(item.recommended_price_usd || item.base_price_usd || 9.99).toFixed(2);
+
+      // ミニサムネイルプレビュー
+      const thumbBox = document.getElementById("manualPpvMiniThumb");
+      const fname = item.filename || ppvId;
+      const mediaUrl = item.media_url || "";
+      const isVid = item.media_type === "video" && item.file_exists !== false;
       if (thumbBox) {
         thumbBox.style.display = "block";
         thumbBox.onclick = () => openMediaLightbox(mediaUrl, item.media_type || "video", item.file_exists !== false, `${fname} (${item.step_label})`);
         thumbBox.innerHTML = isVid
-          ? `<video src="${escapeHtml(mediaUrl)}#t=0.1" preload="metadata" muted playsinline></video>`
+          ? `<video src="${escapeHtml(mediaUrl)}#t=0.1" preload="metadata" muted playsinline"></video>`
           : `<img src="${escapeHtml(mediaUrl)}" alt="${escapeHtml(fname)}">`;
       }
 
-      const recPrice = Number(item.recommended_price_usd || item.base_price_usd || 9.99).toFixed(2);
-      const tripPrice = Number(item.tripwire_price_usd || 5.99).toFixed(2);
-      const basePrice = Number(item.base_price_usd || 9.99).toFixed(2);
-      const whalePrice = Number(item.whale_price_usd || 19.99).toFixed(2);
-      const recLabel = (item.recommended_mode_label_ja || "AI推奨").split(" ")[0];
+      // 選択済みラベル・解除ボタン・ボタンラベルを更新
+      const label = document.getElementById("manualSelectedPpvLabel");
+      if (label) label.textContent = `${item.step_label} • ${fname} (推奨 $${Number(item.recommended_price_usd || item.base_price_usd || 9.99).toFixed(2)})`;
+      const btnLabel = document.getElementById("manualPpvPickerBtnLabel");
+      if (btnLabel) btnLabel.textContent = "PPV素材変更";
+      const clearBtn = document.getElementById("manualPpvClearBtn");
+      if (clearBtn) clearBtn.style.display = "inline-block";
 
-      if (presetSel) {
-        presetSel.style.display = "inline-block";
-        presetSel.innerHTML = `
-          <option value="${recPrice}">🎯 推奨 ($${recPrice} • ${escapeHtml(recLabel)})</option>
-          <option value="${tripPrice}">🏷️ お試し割引 ($${tripPrice})</option>
-          <option value="${basePrice}">💎 標準価格 ($${basePrice})</option>
-          <option value="${whalePrice}">👑 太客VIP ($${whalePrice})</option>
-          <option value="custom">✏️ カスタム自由入力</option>`;
-        presetSel.value = recPrice;
-      }
-      priceInput.value = recPrice;
-      jumpWrap.innerHTML = `<span class="ppv-jump-link" onclick="jumpToVaultItem('${escapeHtml(charId)}', '${escapeHtml(ppvId)}', '${escapeHtml(fname)}')">📂 素材詳細 ↗</span>`;
+      renderManualPpvPickerGrid();
     }
 
-    function onManualPpvPresetChange() {
-      const presetSel = document.getElementById("manualPpvPresetSelect");
+    function clearManualPpvSelection() {
+      state.manualPpvSelectedItem = null;
       const priceInput = document.getElementById("manualPpvPriceInput");
-      if (!presetSel || !priceInput) return;
-      if (presetSel.value === "custom") {
-        priceInput.focus();
-        priceInput.select();
-      } else {
-        priceInput.value = presetSel.value;
+      if (priceInput) priceInput.value = "";
+      const thumbBox = document.getElementById("manualPpvMiniThumb");
+      if (thumbBox) { thumbBox.style.display = "none"; thumbBox.innerHTML = ""; }
+      const label = document.getElementById("manualSelectedPpvLabel");
+      if (label) label.textContent = "";
+      const btnLabel = document.getElementById("manualPpvPickerBtnLabel");
+      if (btnLabel) btnLabel.textContent = "PPV素材選択";
+      const clearBtn = document.getElementById("manualPpvClearBtn");
+      if (clearBtn) clearBtn.style.display = "none";
+      renderManualPpvPickerGrid();
+    }
+
+    function confirmManualPpvSelection() {
+      if (!state.manualPpvSelectedItem) {
+        showToast("⚠️ 先にPPV素材を選択してください");
+        return;
       }
+      closeManualPpvPickerModal();
+      showToast("✅ PPV素材を選択しました。「📨 手動介入送信」で送信できます");
     }
 
     async function sendManualIntervention() {
@@ -3611,8 +3823,12 @@
       }
       const enText = document.getElementById("enInterventionInput").value.trim();
       const jpText = document.getElementById("jpInterventionInput").value.trim();
-      const ppvId = document.getElementById("manualPpvSelect")?.value || "";
-      const ppvPrice = document.getElementById("manualPpvPriceInput")?.value || "";
+      const selected = state.manualPpvSelectedItem || null;
+      const ppvId = selected ? selected.ppv_id : "";
+      const filename = selected ? (selected.filename || "") : "";
+      const priceRaw = document.getElementById("manualPpvPriceInput")?.value || "";
+      const priceNum = parseFloat(priceRaw);
+      const ppvPrice = (ppvId && !isNaN(priceNum) && priceNum > 0) ? priceNum : null;
       if (!enText && !jpText && !ppvId) {
         showToast("⚠️ 送信するメッセージまたは添付PPVを選択してください");
         return;
@@ -3627,21 +3843,20 @@
           content: enText,
           japanese_text: jpText,
           ppv_id: ppvId || null,
-          ppv_price_usd: ppvId && ppvPrice ? parseFloat(ppvPrice) : null,
+          filename: filename || null,
+          ppv_price_usd: ppvPrice,
         }),
       });
       const data = await res.json();
       if (data.ok) {
         document.getElementById("jpInterventionInput").value = "";
         document.getElementById("enInterventionInput").value = "";
-        if (document.getElementById("manualPpvSelect")) {
-          document.getElementById("manualPpvSelect").value = "";
-          onManualPpvSelectChange();
-        }
-        state.lastManualPpvCharId = "";
+        clearManualPpvSelection();
         showToast(ppvId ? `📨 PPVロック添付 ($${Number(ppvPrice || 0).toFixed(2)}) 付き手動DMを送信キューへ投入しました` : "📨 手動介入メッセージを送信し、アラートを解除しました");
         await refreshMonitoring();
         await openThread(state.activeThread.char_id, state.activeThread.fan_id);
+      } else {
+        showToast(`❌ 送信に失敗: ${data.error || "不明なエラー"}`);
       }
     }
 
@@ -3659,6 +3874,7 @@
     }
 
     async function muteFanFromAlert(charId, fanId) {
+      if (!confirm(`顧客 ${fanId} を永久ミュートにしますか？\n今後この顧客からのDMには一切AIが反応しなくなります。\nこの操作は取り消せます（ミュート解除）。`)) return;
       const res = await fetch("/api/monitoring/mute_fan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -3670,6 +3886,20 @@
           state.activeThread = null;
         }
         showToast(`🔇 顧客 (${fanId}) を永久ミュートに設定しました`);
+        await refreshMonitoring();
+      }
+    }
+
+    async function unmuteFan(charId, fanId) {
+      if (!confirm(`顧客 ${fanId} のミュートを解除しますか？\n今後この顧客からのDMにAIが再度反応するようになります。`)) return;
+      const res = await fetch("/api/monitoring/mute_fan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ char_id: charId, fan_id: fanId, muted: false }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        showToast(`🔊 顧客 (${fanId}) のミュートを解除しました。AI自動返信を再開します`);
         await refreshMonitoring();
       }
     }
@@ -3707,6 +3937,7 @@
         syncDefaultPricesCache(null, data.default_prices_by_char);
         const items = data.items || [];
         renderVaultGrid(items);
+        updateBatchRefineCount(items);
         // [Ticket 6.2] 各カードにカテゴリ別タグのドロップダウン選択肢を填充
         const categories = await loadMasterTagsIfNeeded();
         items.forEach(it => {
@@ -3878,9 +4109,12 @@
       }
 
       grid.innerHTML = items.map(it => {
-        const mediaUrl = `/api/vault/media/${encodeURIComponent(it.char_id)}/${encodeURIComponent(it.filename)}`;
+        const mediaCacheBuster = it.redacted_at || it.created_at || "";
+        const mediaUrl = `/api/vault/media/${encodeURIComponent(it.char_id)}/${encodeURIComponent(it.filename)}${mediaCacheBuster ? `?t=${encodeURIComponent(mediaCacheBuster)}` : ""}`;
         const originalUrl = `/api/vault/media/${encodeURIComponent(it.char_id)}/${encodeURIComponent(it.filename)}?version=original`;
         const isUnredacted = it.is_redacted !== true;
+        const isNotRefined = it.visual_status !== 'refined';
+        const isPublishLocked = isUnredacted || isNotRefined;
         const isPlayableVideo = it.media_type === "video" && it.file_exists !== false;
         const mediaTypeLabel = it.media_type === "video" ? "🎬 動画" : "🖼️ 画像";
         const stepBadgeClass = it.ladder_step === 1 ? "badge-char" : (it.ladder_step === 2 ? "badge-phase" : "badge-tier");
@@ -3902,9 +4136,14 @@
                 <span id="stepbadge-${escapeHtml(ck)}" class="badge ${stepBadgeClass}">${stepLabel}</span>
                 <span class="badge badge-low">${mediaTypeLabel} • ${escapeHtml(it.char_id)}</span>
                 ${isUnredacted ? `<span class="badge badge-alert">⚠️ 未加工（非公開ロック）</span>` : ''}
+                ${it.visual_status === 'refined'
+                  ? `<span class="badge" style="background:rgba(8,6,14,.82); color:#4ade80; border-color:rgba(74,222,128,.4);">📷 画像精査済み</span>`
+                  : `<span class="badge" style="background:rgba(8,6,14,.82); color:#fbbf24; border-color:rgba(251,191,36,.4);">📷 画像未精査</span>`}
               </div>
               <div class="vault-zoom-hint">${isPlayableVideo ? '🔍 拡大・音声再生' : '🔍 拡大表示'}</div>
-              ${isUnredacted ? `<button class="vault-redact-btn" onclick="event.stopPropagation(); openMediaRedactModal('${escapeHtml(it.char_id)}', '${escapeHtml(it.ppv_id)}')">✂️ 加工</button>` : ''}
+              ${isUnredacted
+                ? `<button class="vault-redact-btn" onclick="event.stopPropagation(); openMediaRedactModal('${escapeHtml(it.char_id)}', '${escapeHtml(it.ppv_id)}')">✂️ 加工</button>`
+                : `<button class="vault-redact-btn" style="background:rgba(168,85,247,0.35); border-color:#a855f7;" onclick="event.stopPropagation(); openMediaRedactModal('${escapeHtml(it.char_id)}', '${escapeHtml(it.ppv_id)}')">🔄 再編集</button>`}
             </div>
 
             <div class="vault-card-body">
@@ -3922,10 +4161,11 @@
                   <span>購入 <strong>${it.purchases_count || 0}</strong></span>
                   <span style="color:#4ade80; font-weight:800;">$${Number(it.revenue_usd || 0).toFixed(2)}</span>
                 </div>
-                <label style="display:inline-flex; align-items:center; gap:4px; font-size:10.5px; cursor:pointer; flex-shrink:0;">
+                <label style="display:inline-flex; align-items:center; gap:4px; font-size:10.5px; cursor:${isPublishLocked ? 'not-allowed' : 'pointer'}; flex-shrink:0; ${isPublishLocked ? 'opacity:.55;' : ''}">
                   <span>公開</span>
                   <label class="toggle-switch">
-                    <input type="checkbox" id="active-${escapeHtml(ck)}" ${it.is_active ? 'checked' : ''}
+                    <input type="checkbox" id="active-${escapeHtml(ck)}" ${it.is_active ? 'checked' : ''} ${isPublishLocked ? 'disabled' : ''}
+                      title="${isPublishLocked ? (isUnredacted ? '未加工（非公開ロック）のため公開できません。先に「✂️ 加工」を実行してください。' : '画像未精査のため公開できません。先に「🔍 一括精査」を実行してください。') : ''}"
                       onchange="saveVaultCard('${escapeHtml(it.char_id)}', '${escapeHtml(it.ppv_id)}', '${escapeHtml(ck)}')">
                     <span class="toggle-slider"></span>
                   </label>
@@ -3965,7 +4205,7 @@
                 </div>
               </div>
 
-              <div class="form-group" style="background:#100b1c; border:1px solid var(--border); border-radius:6px; padding:6px 8px;">
+              <div class="form-group" style="background:#1a1635; border:1px solid var(--border); border-radius:6px; padding:6px 8px;">
                 <label style="font-size:10.5px; color:#a78bfa; font-weight:700;">③ カテゴリ別マスタータグ <span style="font-size:9px; font-weight:400; color:var(--text-muted);">（ドロップダウンで選択 / 各 0〜1個）</span></label>
                 <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:5px; margin-top:4px;">
                   <div>
@@ -4004,9 +4244,11 @@
                 </div>
               </div>
 
-              <div style="display:flex; justify-content:space-between; gap:6px; margin-top:auto;">
+              <div style="display:flex; gap:6px; margin-top:auto;">
                 <button class="btn btn-sm btn-primary" style="flex:1; justify-content:center;"
                   onclick="saveVaultCard('${escapeHtml(it.char_id)}', '${escapeHtml(it.ppv_id)}', '${escapeHtml(ck)}')">💾 変更保存</button>
+                <button class="btn btn-sm" style="justify-content:center;" title="画像をVLで再解析（補足指示可）"
+                  onclick="openRefineModal('${escapeHtml(it.char_id)}', '${escapeHtml(it.ppv_id)}')">🔁 再解析</button>
                 <button class="btn btn-sm btn-danger"
                   onclick="deleteVaultCard('${escapeHtml(it.char_id)}', '${escapeHtml(it.ppv_id)}')">🗑️ 削除</button>
               </div>
@@ -4069,6 +4311,105 @@
         showToast(`💾 ${ppvId} の設定・売り込みメモを保存しました`);
         loadVaultList();
         loadUnmatchedNeeds();
+      } else if (data.code === "UNREDACTED_MEDIA_LOCKED" || data.code === "VL_NOT_REFINED_LOCKED") {
+        // 未加工（非公開ロック）または画像未精査の素材で公開ONが拒否された場合: トグルをOFFに復旧して明示
+        const cb = document.getElementById(`active-${cardKey}`);
+        if (cb) cb.checked = false;
+        showToast(`🔒 ${data.error}`, true);
+      } else {
+        showToast(`❌ 保存失敗: ${data.error || 'unknown'}`, true);
+      }
+    }
+
+    /* ==========================================
+       [Visionバッチ] 一括精査 / 単品再精査
+       ========================================== */
+
+    // 未精査（draft）件数をツールバーに表示
+    function updateBatchRefineCount(items) {
+      const cnt = (items || []).filter(it => (it.visual_status || "draft") === "draft").length;
+      const el = document.getElementById("batchRefineCount");
+      if (el) el.textContent = cnt > 0 ? `${cnt}件` : "なし";
+      const btn = document.getElementById("batchRefineBtn");
+      if (btn) btn.disabled = cnt === 0;
+      if (btn) btn.style.opacity = cnt === 0 ? "0.45" : "1";
+    }
+
+    async function batchVisionRefine() {
+      const btn = document.getElementById("batchRefineBtn");
+      if (btn) { btn.disabled = true; btn.style.opacity = "0.45"; }
+      showToast("🔍 未精査素材をVLで一括精査中…（数分かかる場合があります）");
+      try {
+        const res = await fetch("/api/vault/batch_vision_refine", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ char_id: "all" }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          showToast(`✅ 一括精査完了: ${data.refined}件 refined / ${data.failed}件 未処理`);
+          loadVaultList();
+        } else {
+          showToast(`❌ 一括精査失敗: ${data.error || "unknown"}`, true);
+        }
+      } catch (e) {
+        showToast(`❌ 一括精査エラー: ${e}`, true);
+      } finally {
+        if (btn) { btn.style.opacity = "1"; }
+      }
+    }
+
+    // 単品再精査ダイアログ（補足指示入力）
+    function openRefineModal(charId, ppvId) {
+      const existing = document.getElementById("refineModal");
+      if (existing) existing.remove();
+      const modal = document.createElement("div");
+      modal.id = "refineModal";
+      modal.className = "redact-modal-backdrop open";
+      modal.innerHTML = `
+        <div style="background:var(--bg-panel); border:1px solid var(--border); border-radius:12px; padding:20px 22px; width:420px; max-width:92vw;">
+          <h3 style="margin:0 0 6px; font-size:14px; color:#e9d5ff;">🔁 PPV画像をVLで再解析</h3>
+          <p style="font-size:11px; color:var(--text-muted); margin:0 0 12px; line-height:1.5;">
+            ${escapeHtml(charId)} / ${escapeHtml(ppvId)}<br>
+            補足指示（任意）：気に入らなかった点を指定すると、その方向で memo・pitch_hint を再生成します。<br>
+            例: 「衣装に焦点を当てて」「もっと過激な表現で」「寝室の雰囲気を強調して」
+          </p>
+          <textarea id="refineInstruction" class="textarea-ctrl" rows="3" style="width:100%; font-size:12px; padding:8px;"
+            placeholder="（補足指示を入力。空欄ならデフォルトで再生成）"></textarea>
+          <div style="display:flex; gap:8px; margin-top:14px;">
+            <button class="btn btn-primary" style="flex:1;" onclick="confirmRefine('${escapeHtml(charId)}', '${escapeHtml(ppvId)}')">✅ 再解析実行</button>
+            <button class="btn" onclick="document.getElementById('refineModal').remove()">キャンセル</button>
+          </div>
+        </div>
+      `;
+      modal.addEventListener("click", (e) => { if (e.target === modal) modal.remove(); });
+      document.body.appendChild(modal);
+    }
+
+    async function confirmRefine(charId, ppvId) {
+      const instruction = (document.getElementById("refineInstruction")?.value || "").trim();
+      const modal = document.getElementById("refineModal");
+      if (modal) { modal.style.opacity = "0.5"; modal.style.pointerEvents = "none"; }
+      showToast("🔁 画像をVLで再解析中…");
+      try {
+        const res = await fetch("/api/vault/refine_single", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ char_id: charId, ppv_id: ppvId, instruction }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          const status = data.visual_status === "refined" ? "画像精査済み" : "暫定生成（VL未使用）";
+          showToast(`✅ ${ppvId} を再解析しました（${status}）`);
+          if (modal) modal.remove();
+          loadVaultList();
+        } else {
+          showToast(`❌ 再解析失敗: ${data.error || "unknown"}`, true);
+          if (modal) { modal.style.opacity = "1"; modal.style.pointerEvents = "auto"; }
+        }
+      } catch (e) {
+        showToast(`❌ 再解析エラー: ${e}`, true);
+        if (modal) { modal.style.opacity = "1"; modal.style.pointerEvents = "auto"; }
       }
     }
 
@@ -5253,7 +5594,9 @@
         redactModal.ppvId = ppvId;
         redactModal.filename = item.filename || ppvId;
         redactModal.mediaType = item.media_type === "video" ? "video" : "image";
-        redactModal.boxes = [];
+        // 加工済みアイテム再編集時: 既存の redact_boxes を復元
+        const prevBoxes = Array.isArray(item.redact_boxes) ? item.redact_boxes : [];
+        redactModal.boxes = prevBoxes.map(b => ({ x: +b.x || 0, y: +b.y || 0, w: +b.w || 0, h: +b.h || 0, label: b.label || "手動" }));
         redactModal.selectedIdx = -1;
         redactModal.drag = null;
         redactModal.setupDone = false;
@@ -5265,7 +5608,11 @@
         const titleEl = document.getElementById("redactModalTitle");
         if (titleEl) titleEl.textContent = `✏️ 局部モザイク／ぼかし編集: ${charName} ${redactModal.filename}`;
 
-        const mediaUrl = `/api/vault/media/${encodeURIComponent(charId)}/${encodeURIComponent(redactModal.filename)}`;
+        // 加工済みアイテム再編集時は原本（無修正）を表示し、boxes を調整可能にする
+        const isAlreadyRedacted = item.is_redacted === true || item.redact_status === "redacted";
+        const mediaUrl = isAlreadyRedacted
+          ? `/api/vault/media/${encodeURIComponent(charId)}/${encodeURIComponent(redactModal.filename)}?version=original`
+          : `/api/vault/media/${encodeURIComponent(charId)}/${encodeURIComponent(redactModal.filename)}`;
         const img = document.getElementById("redactMediaImg");
         const vid = document.getElementById("redactMediaVideo");
         img.style.display = "none"; vid.style.display = "none";
@@ -5278,22 +5625,38 @@
           vid.src = mediaUrl;
           vid.muted = true;
           vid.addEventListener("loadedmetadata", () => { try { vid.currentTime = 0.1; } catch (e) {} });
-          vid.addEventListener("loadeddata", finishSetup);
-          vid.addEventListener("seeked", finishSetup);
-          setTimeout(finishSetup, 2500);
+          // 動画は videoWidth/videoHeight が確定してから canvas をセットアップする
+          const trySetup = () => {
+            if (sessionToken !== redactModal.session) return;
+            if (vid.videoWidth > 0 && vid.videoHeight > 0) { finishSetup(); }
+            else { setTimeout(trySetup, 100); }
+          };
+          vid.addEventListener("loadeddata", trySetup);
+          vid.addEventListener("seeked", trySetup);
+          setTimeout(trySetup, 2500);
         } else {
           img.style.display = "block";
           img.src = mediaUrl;
           img.onload = finishSetup;
           setTimeout(finishSetup, 2500);
         }
-        resetRedactStatus();
+        if (redactModal.boxes.length > 0) {
+          const statusEl = document.getElementById("redactDetectStatus");
+          if (statusEl) {
+            statusEl.className = "redact-detect-status found";
+            statusEl.textContent = `🔄 再編集モード: 既存の ${redactModal.boxes.length} 箇所の加工枠を復元しました。ドラッグで微調整可。`;
+          }
+        } else {
+          resetRedactStatus();
+        }
         renderRedactBoxList();
         modal.classList.add("open");
+        // 加工枠が0件（新規加工）の場合: モーダル表示後、AI自動検出を自動実行
+        if (redactModal.boxes.length === 0) {
+          runRedactDetect();
+        }
       };
-      const cache = (state.vaultCacheByChar && state.vaultCacheByChar[charId]) || [];
-      const cached = cache.find(it => it.ppv_id === ppvId);
-      if (cached) { doOpen(cached); return; }
+      // キャッシュを使わず常にサーバーから最新データ取得（再編集時の redact_boxes 反映のため）
       fetch(`/api/vault/list?${new URLSearchParams({ char_id: charId, ladder_step: "all", media_type: "all" }).toString()}`)
         .then(r => r.json())
         .then(data => {
@@ -5322,20 +5685,41 @@
       sizeRedactCanvas();
       bindRedactCanvasEvents(canvas);
       drawRedactCanvas();
+      // 動画: フレームがデコードされてからモザイクを再描画する
+      if (redactModal.mediaType === "video") {
+        const vid = redactModal.mediaEl;
+        const onReady = () => {
+          if (redactModal.open && vid.readyState >= 2) {
+            drawRedactCanvas();
+            vid.removeEventListener("seeked", onReady);
+            vid.removeEventListener("timeupdate", onReady);
+          }
+        };
+        vid.addEventListener("seeked", onReady);
+        vid.addEventListener("timeupdate", onReady);
+        // フォールバック: 500ms後に強制再描画
+        setTimeout(() => { if (redactModal.open) drawRedactCanvas(); }, 500);
+      }
     }
 
     function sizeRedactCanvas() {
       const canvas = getRedactCanvas();
       const mediaEl = redactModal.mediaEl;
       if (!canvas || !mediaEl) return;
-      const w = mediaEl.clientWidth || 0;
-      const h = mediaEl.clientHeight || 0;
+      // object-fit: contain により mediaEl の表示領域（実寸）に canvas を重ねる
+      const r = mediaEl.getBoundingClientRect();
+      const wrapR = document.getElementById("redactCanvasWrap").getBoundingClientRect();
+      const w = Math.round(r.width);
+      const h = Math.round(r.height);
       if (!w || !h) return;
       const dpr = window.devicePixelRatio || 1;
       canvas.width = Math.round(w * dpr);
       canvas.height = Math.round(h * dpr);
       canvas.style.width = w + "px";
       canvas.style.height = h + "px";
+      // mediaEl の左上を wrap 内座標で canvas の位置に設定
+      canvas.style.left = Math.round(r.left - wrapR.left) + "px";
+      canvas.style.top = Math.round(r.top - wrapR.top) + "px";
       const ctx = canvas.getContext("2d");
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       redactModal.mediaW = mediaEl.naturalWidth || mediaEl.videoWidth || w;
@@ -5589,7 +5973,7 @@
           }
         } else if (statusEl) {
           statusEl.className = "redact-detect-status empty";
-          statusEl.textContent = "検出0件：手動ドラッグで範囲を指定してください";
+          statusEl.textContent = "✅ 陰部検出なし：加工不要です。「保存して公開」でそのまま公開できます。";
         }
         renderRedactBoxList();
         drawRedactCanvas();
@@ -5609,9 +5993,11 @@
 
     async function saveRedactAndPublish() {
       if (!redactModal.open) return;
-      if (redactModal.boxes.length === 0) {
-        showToast("⚠️ 矩形枠が0件です。AI自動検出またはドラッグで加工範囲を指定してください。");
-        return;
+      const boxCount = redactModal.boxes.length;
+      if (boxCount === 0) {
+        // 加工枠が0件: そのまま公開（加工なし）の確認
+        const confirmed = confirm("加工枠が0件です。モザイク／ぼかしを一切つけずにそのまま公開しますか？");
+        if (!confirmed) return;
       }
       const btn = document.getElementById("redactSaveBtn");
       if (btn) { btn.disabled = true; btn.textContent = "💾 保存中..."; }
@@ -5631,7 +6017,10 @@
         const data = await res.json();
         if (!data.ok) throw new Error(data.error || "保存に失敗しました");
         closeMediaRedactModal();
-        showToast("✅ 局部加工を保存しました。素材を公開（is_active=ON）に切り替えました。");
+        const msg = boxCount === 0
+          ? "✅ 加工枠なしで保存し、素材を公開（is_active=ON）しました。"
+          : `✅ ${boxCount} 箇所の局部加工を保存しました。素材を公開（is_active=ON）に切り替えました。`;
+        showToast(msg);
         if (typeof loadVaultList === "function") loadVaultList();
       } catch (e) {
         showToast("❌ 保存エラー: " + e.message);

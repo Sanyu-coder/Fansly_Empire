@@ -127,9 +127,10 @@ def api_system_state():
     any_enabled = any(c.get("bot_enabled") for c in characters)
     all_enabled = bool(characters) and all(c.get("bot_enabled") for c in characters)
 
+    include_muted = request.args.get("include_muted", "").lower() in ("1", "true", "yes")
     summary = get_dashboard_summary(char_id)
     alerts = get_escalated_fans(char_id)
-    threads = _attach_pending_and_overdue_info(get_fan_threads(char_id), summary=summary, char_id=char_id)
+    threads = _attach_pending_and_overdue_info(get_fan_threads(char_id, include_muted=include_muted), summary=summary, char_id=char_id)
 
     return jsonify(
         {
@@ -264,9 +265,10 @@ def api_monitoring_overview():
     """営業モニタリングタブ用：サマリー・アラート枠・左ペインスレッド一覧"""
     _touch_client_activity()
     char_id = str(request.args.get("char_id") or "all").strip()
+    include_muted = request.args.get("include_muted", "").lower() in ("1", "true", "yes")
     summary = get_dashboard_summary(char_id)
     alerts = get_escalated_fans(char_id)
-    threads = _attach_pending_and_overdue_info(get_fan_threads(char_id), summary=summary, char_id=char_id)
+    threads = _attach_pending_and_overdue_info(get_fan_threads(char_id, include_muted=include_muted), summary=summary, char_id=char_id)
     return jsonify(
         {
             "ok": True,
@@ -293,9 +295,10 @@ def api_monitoring_poll():
     any_enabled = any(c.get("bot_enabled") for c in characters)
     all_enabled = bool(characters) and all(c.get("bot_enabled") for c in characters)
 
+    include_muted = request.args.get("include_muted", "").lower() in ("1", "true", "yes")
     summary = get_dashboard_summary(char_id)
     alerts = get_escalated_fans(char_id)
-    threads = _attach_pending_and_overdue_info(get_fan_threads(char_id), summary=summary, char_id=char_id)
+    threads = _attach_pending_and_overdue_info(get_fan_threads(char_id, include_muted=include_muted), summary=summary, char_id=char_id)
 
     active_thread = None
     if active_char_id and active_fan_id:

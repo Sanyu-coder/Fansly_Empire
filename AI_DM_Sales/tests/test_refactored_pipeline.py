@@ -217,7 +217,7 @@ class TestEarLLMClassification(BaseTempDbTest):
     (厳密ID一致フィルタ・重複除去・has_buy_intent・NEED蓄積) を検証する。
     """
 
-    CHAR = "test_char"
+    CHAR = "char_test_a"
 
     def _seed(self):
         _seed_vault(self.db_path, self.CHAR, [
@@ -339,7 +339,7 @@ class TestPpvDeterministicMatching(BaseTempDbTest):
       - 7日以上経過した未購入PPVは再提案候補に復活
     """
 
-    CHAR = "test_char"
+    CHAR = "char_test_b"
     FAN = "fan_002"
 
     def _seed(self):
@@ -406,7 +406,7 @@ class TestPpvDeterministicMatching(BaseTempDbTest):
 # =====================================================================
 class TestStateMachineTransitions(BaseTempDbTest):
 
-    CHAR = "test_char"
+    CHAR = "char_test_c"
     FAN = "fan_003"
 
     def _seed(self):

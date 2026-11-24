@@ -15,6 +15,66 @@ from app.core import config
 
 
 # ==========================================
+# [Visionバッチ・案A] ファイル名意味辞書
+# 英語ファイル名トークン → (日本語タグ, 見どころフレーズ, 英語pitchフレーズ)
+# VL未導入時にファイル名だけで素材固有の memo/pitch を生成するための辞書。
+# ==========================================
+FILENAME_SEMANTIC_DICT: Dict[str, Dict[str, str]] = {
+    "bedroom":   {"tag": "寝室",       "memo": "ベッドルームのプライベート空間",       "pitch": "in my bedroom"},
+    "selfie":    {"tag": "自撮り",     "memo": "手元のスマホで撮った密着自撮り",       "pitch": "a selfie I just took"},
+    "lingerie":  {"tag": "ランジェリー","memo": "繊細なランジェリーの露出",           "pitch": "wearing this lingerie"},
+    "bra":       {"tag": "ブラジャー", "memo": "ブラジャーのシルエット",              "pitch": "in my bra"},
+    "panty":     {"tag": "パンティ",   "memo": "パンティだけのミニマルな一枚",        "pitch": "just my panties"},
+    "bikini":    {"tag": "ビキニ",     "memo": "ビキニの露出度",                      "pitch": "in my bikini"},
+    "blonde":    {"tag": "ブロンド",   "memo": "ブロンドヘアの印象",                  "pitch": "my blonde hair"},
+    "brunette":  {"tag": "ブラウン",   "memo": "ダークブラウンヘアの印象",            "pitch": "my brunette hair"},
+    "redhead":   {"tag": "紅発",       "memo": "レッドヘアの印象",                    "pitch": "my red hair"},
+    "blackhair": {"tag": "黒髪",       "memo": "黒髪の印象",                          "pitch": "my black hair"},
+    "cowgirl":   {"tag": "カウガール", "memo": "カウガール衣装の雰囲気",              "pitch": "in my cowgirl outfit"},
+    "nurse":     {"tag": "ナース",     "memo": "ナース衣装のシチュエーション",        "pitch": "in my nurse uniform"},
+    "maid":      {"tag": "メイド",     "memo": "メイド衣装のシチュエーション",        "pitch": "in my maid outfit"},
+    "teacher":   {"tag": "先生",       "memo": "先生役のシチュエーション",            "pitch": "playing your teacher"},
+    "doctor":    {"tag": "ドクター",   "memo": "ドクター役のシチュエーション",        "pitch": "in my doctor role"},
+    "office":    {"tag": "オフィス",   "memo": "オフィス룩のシチュエーション",        "pitch": "in my office outfit"},
+    "shower":    {"tag": "シャワー",   "memo": "シャワー後の濡れ髪・湯気",            "pitch": "just out of the shower"},
+    "bathtub":   {"tag": "バスタブ",   "memo": "バスタブの湯気と濡れ感",              "pitch": "in the bath with you"},
+    "pool":      {"tag": "プール",     "memo": "プールの水着シーン",                  "pitch": "by the pool"},
+    "beach":     {"tag": "ビーチ",     "memo": "ビーチの陽光と水着",                  "pitch": "on the beach"},
+    "outdoor":   {"tag": "屋外",       "memo": "屋外の自然光シーン",                  "pitch": "outdoors"},
+    "night":     {"tag": "夜撮り",     "memo": "夜の暗い照明の密着感",                "pitch": "late at night"},
+    "uncensored":{"tag": "無修正",     "memo": "無修正の生々しい映像",                "pitch": "the uncensored version"},
+    "closeup":   {"tag": "クローズアップ","memo":"顔や局部の密着クローズアップ",      "pitch": "a close-up just for you"},
+    "full":      {"tag": "フル尺",     "memo": "フル尺の長尺映像",                    "pitch": "the full length"},
+    "teaser":    {"tag": "ティザー",   "memo": "本編を誘うティザー映像",              "pitch": "a little teaser"},
+    "preview":   {"tag": "プレビュー", "memo": "本編前のプレビュー",                  "pitch": "a quick preview"},
+    "secret":    {"tag": "シークレット","memo":"非公開のシークレット素材",            "pitch": "a secret just for you"},
+    "private":   {"tag": "プライベート","memo":"非公開のプライベート映像",            "pitch": "something private"},
+    "exclusive": {"tag": "限定",       "memo":"限定公開の特別素材",                   "pitch": "exclusive for you"},
+    "whale":     {"tag": "太客限定",   "memo":"太客向けの限定解禁",                   "pitch": "just for my favorite fan"},
+    "vip":       {"tag": "VIP",       "memo":"VIP限定の最高峰素材",                  "pitch": "my VIP secret"},
+    "cum":       {"tag": "カミング",   "memo":"カミングシーンの生々しさ",             "pitch": "the hottest part"},
+    "orgasm":    {"tag": "絶頂",       "memo":"絶頂シーンの迫力",                     "pitch": "right at the edge"},
+    "tits":      {"tag": "バスト",     "memo":"バストのシルエット",                   "pitch": "my best angle"},
+    "boobs":     {"tag": "バスト",     "memo":"バストのシルエット",                   "pitch": "my best angle"},
+    "ass":       {"tag": "ヒップ",     "memo":"ヒップのライン",                       "pitch": "my best curve"},
+    "legs":      {"tag": "レッグ",     "memo":"脚のライン",                           "pitch": "my legs"},
+    "feet":      {"tag": "フット",     "memo":"足のフェチ視点",                       "pitch": "my feet"},
+    "mouth":     {"tag": "マウス",     "memo":"口元のクローズアップ",                 "pitch": "right here"},
+    "tongue":    {"tag": "舌",        "memo":"舌のシチュエーション",                 "pitch": "just for you"},
+    "thong":     {"tag": "トング",     "memo":"トングの露出",                        "pitch": "in my thong"},
+    "stocking":  {"tag": "ストッキング","memo":"ストッキングの脚",                    "pitch": "in my stockings"},
+    "boots":     {"tag": "ブーツ",     "memo":"ブーツの足元",                        "pitch": "in my boots"},
+    "dress":     {"tag": "ドレス",     "memo":"ドレスのシルエット",                   "pitch": "in my dress"},
+    "skirt":     {"tag": "スカート",   "memo":"スカートの揺れ",                      "pitch": "in my skirt"},
+    "shirt":     {"tag": "シャツ",     "memo":"シャツのシチュエーション",             "pitch": "in my shirt"},
+    "top":       {"tag": "トップス",   "memo":"トップスのシルエット",                 "pitch": "in my top"},
+    "smile":     {"tag": "笑顔",       "memo":"笑顔の表情",                          "pitch": "smiling for you"},
+    "wink":      {"tag": "ウィンク",   "memo":"ウィンクの表情",                      "pitch": "winking at you"},
+    "bite":      {"tag": "リップビート",  "memo":"唇を噛む表情",                       "pitch": "biting my lip"},
+}
+
+
+# ==========================================
 # Ticket 2.1: Ollama 直列化ロックの優先度キュー化
 # ==========================================
 
@@ -375,8 +435,13 @@ class LLMClient:
         filename: str,
         media_type: str = "video",
         ladder_step: int = 1,
+        thumbnail_image_path: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """ファイル名やキャラ設定をもとに推奨タグと英語 pitch_hint を自動生成"""
+        """
+        ファイル名意味辞書＋画像軽量特徴量（輝度・色相）をもとに、
+        素材固有の日本語タグ・売り込みメモ・英語 pitch_hint を自動生成する。
+        VLモデルを使わずに（VRAM不要で）素材固有性を高める暫定生成（案A）。
+        """
         step = int(ladder_step) if str(ladder_step).isdigit() else 1
         step = max(1, min(3, step))
 
@@ -387,12 +452,65 @@ class LLMClient:
             if t and not t.isdigit() and len(t) >= 2
         ]
 
+        # [案A-1] ファイル名意味辞書マッチ: 命中語からタグ・見どころ・pitchフレーズを収集
+        semantic_tags: List[str] = []
+        semantic_memos: List[str] = []
+        semantic_pitches: List[str] = []
+        for tok in tokens:
+            ent = FILENAME_SEMANTIC_DICT.get(tok)
+            if not ent:
+                # 複数語結合（bedroom_selfie 等）にも対応: トークン2つ組で辞書検索
+                continue
+            if ent["tag"] not in semantic_tags:
+                semantic_tags.append(ent["tag"])
+            semantic_memos.append(ent["memo"])
+            semantic_pitches.append(ent["pitch"])
+        # 2トークン結合（例: "bedroom_selfie" → "bedroomselfie"）も辞書検索
+        joined = "".join(tokens[:2]).lower()
+        if joined in FILENAME_SEMANTIC_DICT:
+            ent = FILENAME_SEMANTIC_DICT[joined]
+            if ent["tag"] not in semantic_tags:
+                semantic_tags.append(ent["tag"])
+            semantic_memos.append(ent["memo"])
+            semantic_pitches.append(ent["pitch"])
+
+        # [案A-2] サムネイル画像の軽量特徴量（VL不要・PILのみ）: 平均輝度・主色相
+        visual_desc: List[str] = []
+        if thumbnail_image_path and os.path.isfile(thumbnail_image_path):
+            try:
+                from PIL import Image
+                img = Image.open(thumbnail_image_path).convert("RGB")
+                img_small = img.resize((64, 64))
+                px = list(img_small.getdata())
+                n = len(px)
+                avg_r = sum(p[0] for p in px) / n
+                avg_g = sum(p[1] for p in px) / n
+                avg_b = sum(p[2] for p in px) / n
+                brightness = (avg_r * 0.299 + avg_g * 0.587 + avg_b * 0.114) / 255.0
+                if brightness < 0.30:
+                    visual_desc.append("暗めの照明で密着感・夜撮り感がある")
+                elif brightness > 0.70:
+                    visual_desc.append("明るい自然光で清楚・開放的な雰囲気")
+                else:
+                    visual_desc.append("中間の柔らかな照明")
+                # 主色相（R/G/B の支配成分）
+                dominant = max(avg_r, avg_g, avg_b)
+                if dominant == avg_r and avg_r > avg_g and avg_r > avg_b:
+                    visual_desc.append("赤〜ピンク系の色調が印象的")
+                elif dominant == avg_g and avg_g > avg_r and avg_g > avg_b:
+                    visual_desc.append("緑系〜ニュートラルな色調")
+                elif dominant == avg_b and avg_b > avg_r and avg_b > avg_g:
+                    visual_desc.append("青〜紫系の色調でクールな印象")
+            except Exception:
+                pass
+
         step_default_tags_ja = {
             1: ["チラ見せ", "ランジェリー", "寝室", "自撮り", "甘え"],
             2: ["本命動画", "無修正", "密着アングル", "ベッドルーム", "吐息"],
             3: ["超秘蔵VIP", "フル尺", "過激挑発", "完全限定", "絶頂"],
         }
-        base_tags = list(dict.fromkeys(step_default_tags_ja.get(step, ["限定秘密", "自撮り"]) + tokens[:2]))[:6]
+        # [案A] ファイル名意味辞書のタグを優先し、Step既定タグで補完
+        base_tags = list(dict.fromkeys(semantic_tags + step_default_tags_ja.get(step, ["限定秘密", "自撮り"])))[:8]
         if media_type == "image" and "限定フォト" not in base_tags:
             base_tags.append("限定フォト")
 
@@ -401,18 +519,29 @@ class LLMClient:
         tone = persona.get("tone_and_style", "Alluring, playful, teasing yet affectionate.")
 
         step_fallback_memo = {
-            1: "寝室でのリラックスした自撮り導入素材。挨拶〜興味付け（2_Explore〜3_Lead_Pitch）で「さっきこっそり撮ったんだけど見る？」と軽く焦らすと初課金に繋がりやすい。",
-            2: "露出度と密着感が高い本命シークレット素材。導入PPV開封後や「もっと過激なのが見たい」と熱量が上がったタイミングで特別感を演出して提案すると高成約。",
+            1: "導入用の甘え・甘やかし訴求。挨拶〜興味付け（2_Explore〜3_Lead_Pitch）で「さっきこっそり撮ったんだけど見る？」と軽く焦らすと初課金に繋がりやすい。",
+            2: "露出度と密着感が高い本命シークレット。導入PPV開封後や「もっと過激なのが見たい」と熱量が上がったタイミングで特別感を演出して提案すると高成約。",
             3: "普段は絶対に見せない最上位VIP向けの超秘蔵フル素材。太客やリピーターに「あなただけに特別解禁するね」と秘密共有フックでクロージングすると高単価で売れる。",
         }
+        # [案A] 素材固有memo: ファイル名意味辞書の見どころ＋画像特徴量＋Step販売戦略
+        _sem_memo = "、".join(semantic_memos[:3]) if semantic_memos else ""
+        _vis_memo = "。画像的には" + "、".join(visual_desc[:2]) if visual_desc else ""
+        custom_memo = ""
+        if _sem_memo or _vis_memo:
+            custom_memo = f"この素材は{_sem_memo if _sem_memo else '特定のシチュエーション'}" + (_vis_memo or "") + f"。{step_fallback_memo.get(step, step_fallback_memo[1])}"
+        else:
+            custom_memo = step_fallback_memo.get(step, step_fallback_memo[1])
+
+        # [案A] 素材固有pitch: ファイル名意味辞書の英語フレーズを一人称DMに組み込む
+        _sem_pitch = " ".join(semantic_pitches[:2]) if semantic_pitches else ""
         step_fallback_pitch = {
-            1: f"Just took this private {media_type} in my bedroom before bed... kind of shy to show you {nickname} 🖤👀",
-            2: f"The uncensored version of what I teased earlier... way too hot for my public feed, only unlocking this for my favorite {nickname} 😈💋",
-            3: f"My most forbidden Step 3 vault secret... I never show this to regular followers. Promise you'll keep it just between us, {nickname}? 🖤🔥",
+            1: f"Just took this private {media_type} before bed..." + (f" {_sem_pitch}." if _sem_pitch else " in my bedroom.") + f" kind of shy to show you {nickname} 🖤👀",
+            2: f"The uncensored version of what I teased earlier..." + (f" {_sem_pitch}." if _sem_pitch else "") + f" way too hot for my public feed, only unlocking this for my favorite {nickname} 😈💋",
+            3: f"My most forbidden Step 3 vault secret..." + (f" {_sem_pitch}." if _sem_pitch else "") + f" I never show this to regular followers. Promise you'll keep it just between us, {nickname}? 🖤🔥",
         }
         fallback_data = {
             "tags": base_tags,
-            "description_memo": step_fallback_memo.get(step, step_fallback_memo[1]),
+            "description_memo": custom_memo,
             "pitch_hint": step_fallback_pitch.get(step, step_fallback_pitch[1]),
         }
 
@@ -986,12 +1115,14 @@ class LLMClient:
             vision_model = self.detect_or_ensure_vision_model(auto_pull=auto_pull_model) if image_b64 else None
 
             if not image_b64 or not vision_model:
+                # [案A] VL未使用時もサムネイルの軽量特徴量を使って素材固有化
                 base_draft = self.generate_ppv_draft(
                     char_id=char_id,
                     persona=persona,
                     filename=filename,
                     media_type="video" if is_video else "image",
                     ladder_step=step,
+                    thumbnail_image_path=effective_thumb_path,
                 )
                 return {
                     **base_draft,

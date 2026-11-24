@@ -361,6 +361,249 @@ def api_vault_analyze_vision():
                     pass
 
 
+# ==========================================
+# [Visionバッチ] 画像VL精査: 一括 / 単品
+# ==========================================
+
+def _refine_vault_item_with_vision(
+    char_id: str,
+    item: Dict[str, Any],
+    persona: Dict[str, Any],
+    vision_model: Optional[str],
+    instruction: str = "",
+) -> Dict[str, Any]:
+    """
+    1件のPPV素材をVLで精査して tags/description_memo/pitch_hint を更新した item を返す。
+    vision_model が None（VL未導入）の場合は案Aの暫定生成で素材固有化し、refined とはしない。
+    """
+    from app.services.media_blur_service import image_file_to_base64, is_video_media
+
+    filename = str(item.get("filename") or "")
+    media_type = str(item.get("media_type") or "video")
+    ladder_step = max(1, min(3, int(item.get("ladder_step") or 1)))
+    safe_name, full_path, exists = resolve_vault_media_file(char_id, filename)
+    if not exists or not full_path:
+        return item  # 媒体ファイルがない場合は現状維持
+
+    is_video = is_video_media(full_path, media_type=media_type)
+    thumb_tmp: Optional[str] = None
+    thumb_path: Optional[str] = None
+    try:
+        if is_video:
+            thumb_tmp = extract_first_frame_image(
+                media_path=full_path, media_type="video", max_side=1024, jpeg_quality=90
+            )
+            thumb_path = thumb_tmp
+        else:
+            thumb_path = full_path
+
+        image_b64: Optional[str] = None
+        if thumb_path and os.path.isfile(thumb_path) and os.path.getsize(thumb_path) > 0:
+            image_b64 = image_file_to_base64(thumb_path, max_side=1024, jpeg_quality=90)
+
+        result: Dict[str, Any]
+        used_vision = False
+        if image_b64 and vision_model:
+            # VL解析（keep_alive 60s でモデルがメモリに居残り→VRAM再ロードを回避）
+            display_name = persona.get("display_name", char_id)
+            nickname = persona.get("user_nickname_default", "babe").split("/")[0].strip()
+            tone = persona.get("tone_and_style", "Alluring, playful, teasing yet affectionate.")
+            media_kind_ja = "動画（先頭1フレーム目のサムネイル静止画）" if is_video else "画像"
+            instruction_line = f"\n【追加指示（必ず反映）】{instruction}" if instruction.strip() else ""
+            system_prompt = (
+                f"あなたはFanslyクリエイター「{display_name}」専属の優秀な日本人AI営業ディレクター兼ビジュアルアナリストです。\n"
+                "添付されたPPV素材の画像を隅々まで観察し、**画像に実際に映っている視覚情報のみ**に基づいて、以下のJSONオブジェクトのみを出力してください。\n"
+                "【厳守ルール】\n"
+                "1. 画像に映っていない衣装・場所・ポーズを推測や定型句で捏造しないこと。\n"
+                "2. `tags` は人物の外見・衣装・ポーズ・表情・背景・プレイから具体的な日本語単語を6〜8個抽出すること。\n"
+                "3. `description_memo` は2〜3文の自然な日本語で、1文目で視覚的見どころ、2〜3文目で刺さるファン層と焦らしタイミングを実践的に書くこと。\n"
+                f"4. `pitch_hint` のみ、クリエイター本人（一人称 I/my/me）がファン（{nickname}）へ直接語りかける誘惑的な英語DM文（1〜2文）にすること。"
+                f"{instruction_line}\n"
+                '{\n  "tags": [...],\n  "description_memo": "...",\n  "pitch_hint": "..."\n}'
+            )
+            user_prompt = (
+                f"クリエイター名: {display_name}\n対象素材種別: {media_kind_ja}\n"
+                f"販売階段レベル: Step {ladder_step}\n英語キャラ口調参考: {tone}\n"
+                "添付画像を詳しく観察し、実際の視覚特徴に基づいたJSONのみを出力してください:"
+            )
+            raw_vision = llm_client._call_vision_generate(
+                vision_model=vision_model,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                image_b64=image_b64,
+            )
+            parsed = llm_client.extract_json_object(raw_vision or "", default={}) if raw_vision else {}
+            tags = llm_client._clean_vision_tags(parsed.get("tags"))
+            memo = str(parsed.get("description_memo") or parsed.get("pitch_note") or "").strip()
+            hint = str(parsed.get("pitch_hint") or "").strip()
+            hint = re.sub(r"\s*#[^\s]+", "", hint).strip().strip('"')
+            if tags or memo:
+                tags, memo = llm_client._ensure_japanese_tags_and_memo(
+                    tags=tags, description_memo=memo, step=ladder_step, display_name=display_name
+                )
+            if tags and memo and hint:
+                item["tags"] = tags
+                item["tags_json"] = json.dumps(tags, ensure_ascii=False)
+                item["description_memo"] = memo
+                item["pitch_note"] = memo
+                item["pitch_hint"] = hint
+                item["visual_status"] = "refined"
+                used_vision = True
+            # VL出力が不完全な場合は案Aで補完
+            if not used_vision:
+                draft = llm_client.generate_ppv_draft(
+                    char_id=char_id, persona=persona, filename=filename,
+                    media_type=media_type, ladder_step=ladder_step,
+                    thumbnail_image_path=thumb_path,
+                )
+                if not item.get("description_memo"):
+                    item["description_memo"] = draft.get("description_memo") or ""
+                    item["pitch_note"] = item["description_memo"]
+                if not item.get("pitch_hint"):
+                    item["pitch_hint"] = draft.get("pitch_hint") or ""
+        else:
+            # VL未導入・画像なし: 案Aの暫定生成のみ（refinedにしない）
+            draft = llm_client.generate_ppv_draft(
+                char_id=char_id, persona=persona, filename=filename,
+                media_type=media_type, ladder_step=ladder_step,
+                thumbnail_image_path=thumb_path,
+            )
+            item["description_memo"] = draft.get("description_memo") or item.get("description_memo") or ""
+            item["pitch_note"] = item["description_memo"]
+            item["pitch_hint"] = draft.get("pitch_hint") or item.get("pitch_hint") or ""
+            if not item.get("tags"):
+                item["tags"] = draft.get("tags") or []
+                item["tags_json"] = json.dumps(item["tags"], ensure_ascii=False)
+        return item
+    finally:
+        if thumb_tmp and os.path.exists(thumb_tmp):
+            try:
+                os.remove(thumb_tmp)
+            except Exception:
+                pass
+
+
+@vault_bp.route("/api/vault/batch_vision_refine", methods=["POST"])
+def api_vault_batch_vision_refine():
+    """
+    [Visionバッチ・第2段] visual_status='draft' のPPV素材を1セッションで一括VL精査する。
+    VLモデルを1回だけロードし、全draft素材を順番に解析（VRAMを1回だけ占有）。
+    body: { char_id, instruction? } — char_id 省略時は全キャラ対象。
+    """
+    data = (request.get_json(silent=True) or {})
+    char_id = str(data.get("char_id") or "").strip()
+    instruction = str(data.get("instruction") or "").strip()
+
+    target_chars = [char_id] if char_id and char_id != "all" else list_character_ids()
+    if not target_chars:
+        return jsonify({"ok": False, "error": "No characters found"}), 404
+
+    # draft素材の有無を確認（draft 0件なら早期return、VLモデルdetectをスキップ）
+    draft_items: List[Tuple[str, Dict[str, Any], Dict[str, Any]]] = []  # (cid, item, persona)
+    for cid in target_chars:
+        items = load_vault_items(cid)
+        persona = load_dm_persona(cid)
+        for it in items:
+            if str(it.get("visual_status") or "draft") == "draft":
+                draft_items.append((cid, it, persona))
+
+    if not draft_items:
+        return jsonify({"ok": True, "refined": 0, "failed": 0, "skipped": 0, "error": "No draft items"})
+
+    # VLモデルを1回だけdetect（ロード）— draft素材がある場合のみ
+    vision_model = llm_client.detect_or_ensure_vision_model(auto_pull=False)
+
+    total_refined = 0
+    total_failed = 0
+    per_char: Dict[str, int] = {}
+    details: List[Dict[str, Any]] = []
+
+    # cidごとにグループ化して save_vault_items を1回だけ呼ぶ
+    from collections import defaultdict
+    items_by_cid: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    personas: Dict[str, Dict[str, Any]] = {}
+    for cid, it, persona in draft_items:
+        items_by_cid.setdefault(cid, []).append(it)
+        personas[cid] = persona
+
+    for cid in items_by_cid:
+        persona = personas[cid]
+        items = load_vault_items(cid)
+        refined_in_char = 0
+        for it in items:
+            if str(it.get("visual_status") or "draft") != "draft":
+                continue
+            try:
+                new_it = _refine_vault_item_with_vision(cid, it, persona, vision_model, instruction)
+                if str(new_it.get("visual_status")) == "refined":
+                    for i, x in enumerate(items):
+                        if x.get("ppv_id") == new_it.get("ppv_id"):
+                            items[i] = new_it
+                            break
+                    refined_in_char += 1
+                    total_refined += 1
+                    details.append({"char_id": cid, "ppv_id": new_it.get("ppv_id"), "status": "refined"})
+                else:
+                    total_failed += 1
+                    details.append({"char_id": cid, "ppv_id": new_it.get("ppv_id"), "status": "draft(no_vl)"})
+            except Exception as e:
+                total_failed += 1
+                details.append({"char_id": cid, "ppv_id": it.get("ppv_id"), "status": f"error:{e}"})
+        if refined_in_char > 0:
+            save_vault_items(cid, items)
+            per_char[cid] = refined_in_char
+
+    return jsonify({
+        "ok": True,
+        "vision_model": vision_model,
+        "refined": total_refined,
+        "failed": total_failed,
+        "per_char": per_char,
+        "details": details,
+    })
+
+
+@vault_bp.route("/api/vault/refine_single", methods=["POST"])
+def api_vault_refine_single():
+    """
+    [Visionバッチ・第3段] 1件のPPV素材をVLで再精査する。
+    気に入らなかった memo/pitch を、補足指示(instruction)を付けて再生成。
+    body: { char_id, ppv_id, instruction? }
+    """
+    data = (request.get_json(silent=True) or {})
+    char_id = str(data.get("char_id") or "").strip()
+    ppv_id = str(data.get("ppv_id") or "").strip()
+    instruction = str(data.get("instruction") or "").strip()
+    if not char_id or not ppv_id:
+        return jsonify({"ok": False, "error": "char_id and ppv_id required"}), 400
+
+    items = load_vault_items(char_id)
+    target = next((it for it in items if it.get("ppv_id") == ppv_id), None)
+    if target is None:
+        return jsonify({"ok": False, "error": "PPV item not found"}), 404
+
+    persona = load_dm_persona(char_id)
+    vision_model = llm_client.detect_or_ensure_vision_model(auto_pull=False)
+    new_it = _refine_vault_item_with_vision(char_id, target, persona, vision_model, instruction)
+    # リスト内の該当itemを上書きして保存
+    for i, x in enumerate(items):
+        if x.get("ppv_id") == ppv_id:
+            items[i] = new_it
+            break
+    save_vault_items(char_id, items)
+
+    return jsonify({
+        "ok": True,
+        "char_id": char_id,
+        "ppv_id": ppv_id,
+        "vision_model": vision_model,
+        "visual_status": new_it.get("visual_status"),
+        "tags": new_it.get("tags"),
+        "description_memo": new_it.get("description_memo"),
+        "pitch_hint": new_it.get("pitch_hint"),
+    })
+
+
 @vault_bp.route("/api/vault/upload", methods=["POST"])
 def api_vault_upload():
     """
@@ -489,6 +732,11 @@ def api_vault_upload():
             except Exception:
                 pass
 
+    # [Visionバッチ・第1段] 追加時はAIを一切使用しない（暫定メモ・ヒント生成なし）
+    # メモ・ヒント・タグの自動生成はVL一括精査（/api/vault/refine_all）で実施する
+    visual_status = "draft"
+    auto_generated = False
+
     new_item = {
         "ppv_id": ppv_id,
         "filename": saved_filename,
@@ -507,6 +755,8 @@ def api_vault_upload():
         "description_memo": description_memo,
         "pitch_note": description_memo,
         "pitch_hint": pitch_hint,
+        # [Visionバッチ] 画像VL精査ステータス
+        "visual_status": visual_status,
         "is_active": False,
         "is_redacted": False,
         "redact_status": "unredacted",
@@ -846,6 +1096,17 @@ def api_vault_update():
                                 "ok": False,
                                 "error": "未加工のPPV素材は公開にできません。先にモザイク／ぼかし加工を保存してください。",
                                 "code": "UNREDACTED_MEDIA_LOCKED",
+                            }
+                        ),
+                        400,
+                    )
+                if want_active and str(item.get("visual_status") or "draft") != "refined":
+                    return (
+                        jsonify(
+                            {
+                                "ok": False,
+                                "error": "画像未精査のため公開にできません。先に「🔍 一括精査」または「画像精査」を実行してください。",
+                                "code": "VL_NOT_REFINED_LOCKED",
                             }
                         ),
                         400,
