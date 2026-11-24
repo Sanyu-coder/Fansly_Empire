@@ -4,6 +4,8 @@ import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
+from flask import current_app
+
 from app.core import config
 from app.core.database import (
     DEFAULT_STAGE_THRESHOLDS,
@@ -749,6 +751,22 @@ class SalesEngine:
 
         return floor_score
 
+    @staticmethod
+    def _ja_to_en_hint(hint_ja: str) -> str:
+        """日本語の pitch_hint を英語に翻訳（DM LLM は英語で出力するため）。"""
+        if not hint_ja:
+            return "Exclusive secret clip just for you"
+        # 既に英語の場合はそのまま返す（ASCII 文字が多いと判定）
+        ascii_ratio = sum(1 for c in hint_ja if ord(c) < 128) / max(len(hint_ja), 1)
+        if ascii_ratio > 0.85:
+            return hint_ja
+        try:
+            from app.core.llm_client import llm_client
+            with current_app.app_context():
+                return llm_client.translate_fan_ja_to_en(hint_ja) or hint_ja
+        except Exception:
+            return hint_ja
+
     def evaluate_stage_progression(
         self,
         current_phase: str,
@@ -1188,7 +1206,7 @@ class SalesEngine:
                 f"- Media Type: {recommended_ppv.get('media_type')}\n"
                 f"- Tags: {', '.join(recommended_ppv.get('tags') or [])}\n"
                 f"- Offered Price (Dynamic {pricing_mode.upper()}): ${float(recommended_ppv.get('offered_price_usd') or 9.99):.2f}\n"
-                f"- Pitch Hint: {recommended_ppv.get('pitch_hint') or 'Exclusive secret clip just for you'}"
+                f"- Pitch Hint: {self._ja_to_en_hint(recommended_ppv.get('pitch_hint') or 'Exclusive secret clip just for you')}"
                 f"{memo_line}"
             )
         else:
@@ -1246,17 +1264,18 @@ class SalesEngine:
         if sales_phase in ("3_Lead_Pitch", "4_Lock_Close") and recommended_ppv:
             price_val = float(recommended_ppv.get("offered_price_usd") or 9.99)
             step_num = int(recommended_ppv.get("ladder_step") or 1)
-            pitch_hint = recommended_ppv.get("pitch_hint") or "I recorded a secret bedroom clip just for you."
+            # pitch_hint は VL が生成した素材フック説明（三人称解説文）。
+            # フォールバック DM 本文にはそのまま埋め込まず、汎用の一人称誘い文を使う。
             if sales_phase == "4_Lock_Close":
                 return (
                     f"Mmm {nickname}, I can't hold back anymore~ 🖤\n"
-                    f"{pitch_hint}\n"
+                    f"I recorded a secret clip just for you, and it's the hottest one I've ever made.\n"
                     f"I attached Step {step_num} right here for a special ${price_val:.2f} ({pricing_mode.upper()}) — unlock it before I get shy and delete it 😈💋"
                 )
             return (
                 f"Mmm I love how you talk to me, {nickname}~ 🖤\n"
-                f"{pitch_hint}\n"
-                f"I unlocked it at a special ${price_val:.2f} ({pricing_mode.upper()}) just for you right now 😈💋"
+                f"I unlocked something special just for you — a secret clip you've never seen before.\n"
+                f"Get it now for ${price_val:.2f} ({pricing_mode.upper()}) and I won't show it to anyone else 😈💋"
             )
 
         if sales_phase == "5_Cooldown":
@@ -2023,6 +2042,7 @@ def evaluate_state_transition(
 
     meta: Dict[str, Any] = {
         "matched_tags": matched_tags,
+        "free_keywords": ear_result.get("unmatched_needs") or [],
         "reason_ja": "",
         "next_transition_condition": "",
         "new_unmatched_needs": new_needs,
@@ -2098,14 +2118,16 @@ def evaluate_state_transition(
 
     turns = max(0, int(state_step_turns or 0))
 
+    free_kws: List[str] = [str(k).strip() for k in (meta.get("free_keywords") or []) if str(k).strip()]
+
     # --- 1_Collect_Tags ---
     if current_state in (STATE_COLLECT, "", "1_Icebreak", "2_Explore"):
         if has_buy_intent:
             # [例外① 即買い飛び級] 購入意向あり → 2_Pitch_PPV へ即時遷移
             # 在庫があれば PPV 付与、なければ ppv=None で遷移 (build_speaker_prompt が NO INVENTORY 指示を使用)
-            ppv = match_ppv_deterministic(char_id, fan_id, matched_tags, ladder_step=1, is_rescue=False, db_path=db_path)
+            ppv = match_ppv_deterministic(char_id, fan_id, matched_tags, ladder_step=1, is_rescue=False, db_path=db_path, free_keywords=free_kws)
             if ppv is None and matched_tags:
-                ppv = match_ppv_deterministic(char_id, fan_id, matched_tags, ladder_step=1, is_rescue=True, db_path=db_path)
+                ppv = match_ppv_deterministic(char_id, fan_id, matched_tags, ladder_step=1, is_rescue=True, db_path=db_path, free_keywords=free_kws)
             if ppv:
                 meta["reason_ja"] = "即買い飛び級: 購入意向あり＆在庫一致 → 2_Pitch_PPV へ即時遷移"
                 meta["next_transition_condition"] = "PPV提案送信成功後に 3_Cooldown"
@@ -2116,7 +2138,7 @@ def evaluate_state_transition(
 
         # [救済① 天井到達] 往復数 >= tag_collect_max_turns → 2_Pitch_PPV へ強制遷移
         if turns >= int(tag_collect_max_turns or 5):
-            ppv = match_ppv_deterministic(char_id, fan_id, matched_tags, ladder_step=1, is_rescue=True, db_path=db_path)
+            ppv = match_ppv_deterministic(char_id, fan_id, matched_tags, ladder_step=1, is_rescue=True, db_path=db_path, free_keywords=free_kws)
             if ppv:
                 meta["reason_ja"] = f"天井到達 ({turns}往復 >= {tag_collect_max_turns}) → 汎用PPVで 2_Pitch_PPV へ強制遷移"
                 meta["next_transition_condition"] = "PPV提案送信成功後に 3_Cooldown"
@@ -2127,7 +2149,7 @@ def evaluate_state_transition(
 
         # [通常ルート] 有効タグが目標数揃い ＆ 一致する未購入PPV在庫あり → 2_Pitch_PPV
         if len(matched_tags) >= int(tag_collect_target_count or 1):
-            ppv = match_ppv_deterministic(char_id, fan_id, matched_tags, ladder_step=1, is_rescue=False, db_path=db_path)
+            ppv = match_ppv_deterministic(char_id, fan_id, matched_tags, ladder_step=1, is_rescue=False, db_path=db_path, free_keywords=free_kws)
             if ppv:
                 meta["reason_ja"] = f"タグ {len(matched_tags)} 個で対象PPV在庫一致 → 2_Pitch_PPV へ遷移"
                 meta["next_transition_condition"] = "PPV提案送信成功後に 3_Cooldown"
@@ -2169,9 +2191,9 @@ def evaluate_state_transition(
     if current_state == STATE_COOLDOWN:
         # [破綻2修正] 冷却中の購入意向救済: 機会損失を防ぐため早期復帰
         if has_buy_intent:
-            ppv = match_ppv_deterministic(char_id, fan_id, matched_tags, ladder_step=1, is_rescue=False, db_path=db_path)
+            ppv = match_ppv_deterministic(char_id, fan_id, matched_tags, ladder_step=1, is_rescue=False, db_path=db_path, free_keywords=free_kws)
             if ppv is None and matched_tags:
-                ppv = match_ppv_deterministic(char_id, fan_id, matched_tags, ladder_step=1, is_rescue=True, db_path=db_path)
+                ppv = match_ppv_deterministic(char_id, fan_id, matched_tags, ladder_step=1, is_rescue=True, db_path=db_path, free_keywords=free_kws)
             if ppv:
                 meta["reason_ja"] = "3_Cooldown 中だが購入意向あり＆在庫一致 → 2_Pitch_PPV へ救済復帰 (state_step_turns=0)"
                 meta["next_transition_condition"] = "PPV提案送信成功後に 3_Cooldown"
@@ -2227,11 +2249,22 @@ def build_speaker_prompt(
 
     if state == STATE_PITCH and chosen_ppv:
         price = chosen_ppv.get("base_price_usd") or 9.99
-        hint = chosen_ppv.get("pitch_hint") or "It's your exclusive secret clip."
-        instruction = (
-            f"SALES DIRECTIVE: Pitch the confirmed PPV now. Price ${price}. "
-            f"Hook: {hint}. Confidently present it at the exact price, make it irresistible, do NOT over-promise."
-        )
+        hint = chosen_ppv.get("pitch_hint") or ""
+        # pitch_hint は VL が生成した「素材の視覚的特徴フック説明」（三人称解説文・日本語）。
+        # DM LLM は英語で出力するため、pitch_hint を英語に翻訳して渡す。
+        if hint:
+            instruction = (
+                f"SALES DIRECTIVE: Pitch the confirmed PPV now. Price ${price:.2f}. "
+                f"Visual hook reference: {self._ja_to_en_hint(hint)}. "
+                f"Using the visual details above as inspiration, write a seductive first-person English DM "
+                f"that teases this specific content. Make it feel personal to THIS media, not generic. "
+                f"Confidently present it at the exact price. Do NOT over-promise. Do NOT copy the hook reference verbatim."
+            )
+        else:
+            instruction = (
+                f"SALES DIRECTIVE: Pitch the confirmed PPV now. Price ${price:.2f}. "
+                f"Confidently present it at the exact price, make it irresistible, do NOT over-promise."
+            )
     elif state == STATE_PITCH and not chosen_ppv:
         instruction = (
             "PITCH DIRECTIVE (NO INVENTORY): The fan wants to buy or reached pitch stage, "

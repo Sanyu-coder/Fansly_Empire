@@ -1,6 +1,6 @@
 {
-  "version": 2,
-  "description": "カテゴリ別マスタータグ定義。耳役LLMのタグ分類・PPV決定論的マッチングの基準タグ辞書。v2: fan_wish カテゴリ追加（未登録ファン要望の定量化用）。",
+  "version": 3,
+  "description": "カテゴリ別マスタータグ定義。耳役LLMのタグ分類・PPV決定論的マッチングの基準タグ辞書。v3: play +7（体位・行為）、body_outfit +9（服種・小物）、situation +7（場所追加）。全50タグ。",
   "categories": {
     "play": {
       "name_ja": "プレイ・属性",
@@ -52,6 +52,48 @@
           "category": "play",
           "name_ja": "ティージング・からかい",
           "llm_hint": "teasing, tease, deny, wait, patience, i will not let you, almost"
+        },
+        {
+          "id": "rimming",
+          "category": "play",
+          "name_ja": "アナルプレイ",
+          "llm_hint": "rimming, anal, rim, anilingus, ass to mouth, armpit"
+        },
+        {
+          "id": "threesome",
+          "category": "play",
+          "name_ja": "3P・三人掛かり",
+          "llm_hint": "threesome, 3some, threesome, group, two guys, with a friend, extra person"
+        },
+        {
+          "id": "orgasm",
+          "category": "play",
+          "name_ja": "絶頂・オナ潮",
+          "llm_hint": "orgasm, squirt, cum, climax, come for me, shooting, splashing"
+        },
+        {
+          "id": "toys",
+          "category": "play",
+          "name_ja": "トイ使用",
+          "llm_hint": "toys, vibrator, dildo, rabbit, wand, toy inside, plug, massager"
+        },
+        {
+          "id": "dancing",
+          "category": "play",
+          "name_ja": "ダンス",
+          "llm_hint": "dancing, dance, twerking, body roll, moving to music, sexy dance"
+        },
+        {
+          "id": "tongue",
+          "category": "play",
+          "name_ja": "舌出し",
+          "llm_hint": "tongue, tongue out, sticking tongue, open mouth, tongue in mouth"
+        },
+        {
+          "id": "cum_play",
+          "category": "play",
+          "name_ja": "中出し",
+          "llm_hint": "cum, creampie, internal, cum inside, filling you up, messy, cum on face"
         }
       ]
     },
@@ -111,6 +153,60 @@
           "category": "body_outfit",
           "name_ja": "メイド",
           "llm_hint": "maid, maid outfit, maid dress, apron, maid costume, housekeeping"
+        },
+        {
+          "id": "tshirt",
+          "category": "body_outfit",
+          "name_ja": "Tシャツ",
+          "llm_hint": "tshirt, tee, oversized shirt, his shirt, borrowed shirt, casual top"
+        },
+        {
+          "id": "denim",
+          "category": "body_outfit",
+          "name_ja": "デニム・ジーンズ",
+          "llm_hint": "denim, jeans, denim skirt, denim shorts, denim outfit, blue jeans"
+        },
+        {
+          "id": "sportswear",
+          "category": "body_outfit",
+          "name_ja": "スポーツウェア",
+          "llm_hint": "sportswear, athletic, gym clothes, sports bra, leggings, workout outfit"
+        },
+        {
+          "id": "kimono",
+          "category": "body_outfit",
+          "name_ja": "着物",
+          "llm_hint": "kimono, japanese dress, yukata, traditional, silk robe, oba"
+        },
+        {
+          "id": "uniform",
+          "category": "body_outfit",
+          "name_ja": "制服",
+          "llm_hint": "uniform, school uniform, work uniform, sailor suit, pleated skirt, blazer"
+        },
+        {
+          "id": "fur_coat",
+          "category": "body_outfit",
+          "name_ja": "毛皮コート",
+          "llm_hint": "fur, fur coat, fur stole, faux fur, fluffy, luxury coat"
+        },
+        {
+          "id": "gloves",
+          "category": "body_outfit",
+          "name_ja": "手袋",
+          "llm_hint": "gloves, fingerless, leather gloves, long gloves, opera gloves, glove"
+        },
+        {
+          "id": "heels",
+          "category": "body_outfit",
+          "name_ja": "ハイヒール",
+          "llm_hint": "heels, high heels, stiletto, pumps, platform, heeled boots"
+        },
+        {
+          "id": "corset",
+          "category": "body_outfit",
+          "name_ja": "コルセット",
+          "llm_hint": "corset, bustier, laced, tight, waist cincher, corset top"
         }
       ]
     },
@@ -164,6 +260,48 @@
           "category": "situation",
           "name_ja": "POV・一人称視点",
           "llm_hint": "pov, point of view, first person, camera angle, looking at me"
+        },
+        {
+          "id": "pool",
+          "category": "situation",
+          "name_ja": "プール",
+          "llm_hint": "pool, swimming pool, poolside, pool party, water, chlorine, pool deck"
+        },
+        {
+          "id": "beach",
+          "category": "situation",
+          "name_ja": "海辺・ビーチ",
+          "llm_hint": "beach, seaside, ocean, waves, sand, shoreline, surf"
+        },
+        {
+          "id": "gym",
+          "category": "situation",
+          "name_ja": "ジム・体育館",
+          "llm_hint": "gym, fitness, workout, weights, treadmill, exercise, gym floor"
+        },
+        {
+          "id": "karaoke",
+          "category": "situation",
+          "name_ja": "カラオケ",
+          "llm_hint": "karaoke, singing, mic, song, karaoke room, booth, music"
+        },
+        {
+          "id": "restaurant",
+          "category": "situation",
+          "name_ja": "飲食店・レストラン",
+          "llm_hint": "restaurant, cafe, dinner, table, menu, waiter, fine dining, bistro"
+        },
+        {
+          "id": "park",
+          "category": "situation",
+          "name_ja": "公園",
+          "llm_hint": "park, playground, fountain, grass, bench, public park, garden"
+        },
+        {
+          "id": "rooftop",
+          "category": "situation",
+          "name_ja": "ルーフトップ・屋上",
+          "llm_hint": "rooftop, rooftop, terrace, city view, skyline, top floor, open sky"
         }
       ]
     },

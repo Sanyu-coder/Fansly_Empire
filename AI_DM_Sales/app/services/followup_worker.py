@@ -347,11 +347,12 @@ class FollowupWorker:
         display_name = persona.get("display_name") or char_id
         tone = persona.get("tone_and_style") or "Playful, teasing, affectionate."
         nickname = persona.get("user_nickname_default") or "babe"
-        pitch_hint = str(step2_ppv.get("pitch_hint") or "It's the hotter continuation of what you just saw.").strip()
-
+        # pitch_hint は VL が生成した素材フック説明（三人称解説文）。
+        # フォールバック DM 本文にはそのまま埋め込まず、汎用の一人称誘い文を使う。
         fallback_en = (
             f"Thank you so much for unlocking my clip earlier, {nickname} 🖤 "
-            f"Since you loved it, I kept the much hotter Step 2 continuation secret... {pitch_hint} "
+            f"Since you loved it, I kept the much hotter Step 2 continuation secret... "
+            f"It's the wildest thing I've ever recorded, just for you. "
             f"Want to unlock it right now for ${offered_price:.2f}? 😈💋"
         )
         fallback_ja = (
@@ -360,11 +361,22 @@ class FollowupWorker:
             f"今すぐ ${offered_price:.2f} で覗いてみる？😈💋"
         )
 
+        # pitch_hint（素材フック説明・日本語）を LLM への参考情報として渡し、
+        # LLM が一人称の誘惑的 DM 文を独自に生成する。
+        # DM LLM は英語で出力するため、pitch_hint を英語に翻訳して渡す。
+        hint = str(step2_ppv.get("pitch_hint") or "").strip()
+        if hint:
+            hint_en = llm_client.translate_fan_ja_to_en(hint) or hint
+        else:
+            hint_en = ""
+        hint_line = f"\nVisual hook reference: {hint_en}. Use these visual details as inspiration." if hint_en else ""
         system_prompt = (
             f"You are {display_name}, a Fansly creator.\n"
             f"Tone & Style: {tone}\n"
             "The fan just unlocked your Step 1 intro PPV clip recently and is high-intent.\n"
-            f"Pitch your Step 2 main secret clip ({pitch_hint}) priced at ${offered_price:.2f} in 2 sentences.\n"
+            f"Pitch your Step 2 main secret clip priced at ${offered_price:.2f} in 2 sentences."
+            f"{hint_line}\n"
+            "Write a seductive first-person English DM. Do NOT copy the hook reference verbatim.\n"
             "Output ONLY the raw English DM text."
         )
         user_prompt = f"Fan: {username}, Step 2 PPV ID: {step2_ppv.get('ppv_id')}, Price: ${offered_price:.2f}"

@@ -63,15 +63,9 @@ def _parse_tags(raw_tags: Any) -> List[str]:
     return []
 
 
-def _needs_vision_enrichment(tags: List[str], description_memo: str) -> bool:
-    """タグや売り込みメモが未入力、またはファイル名由来の英数字トークンのみの場合は Vision 解析を実行する"""
-    if not tags or not description_memo:
-        return True
-    ja_re = re.compile(r"[\u3040-\u30ff\u4e00-\u9faf]")
-    generic_ascii = {"fyp", "uncensored", "video", "image", "mp4", "step1", "step2", "step3", "secret", "clip"}
-    if all(t.lower() in generic_ascii for t in tags):
-        return True
-    if not any(ja_re.search(t) for t in tags) and not ja_re.search(description_memo):
+def _needs_vision_enrichment(pitch_hint: str) -> bool:
+    """pitch_hint が未入力の場合は Vision 解析を実行する"""
+    if not pitch_hint or not pitch_hint.strip():
         return True
     return False
 
@@ -213,9 +207,6 @@ def api_vault_preview_draft():
             "base_price_usd": step_prices["base_price_usd"],
             "tripwire_price_usd": step_prices["tripwire_price_usd"],
             "whale_price_usd": step_prices["whale_price_usd"],
-            "tags": draft["tags"],
-            "description_memo": draft.get("description_memo") or "",
-            "pitch_note": draft.get("description_memo") or "",
             "pitch_hint": draft["pitch_hint"],
         }
     )
@@ -317,10 +308,6 @@ def api_vault_analyze_vision():
 
         saved_item = None
         if ppv_id and target_item is not None and save_to_vault:
-            target_item["tags"] = vision_res["tags"]
-            target_item["tags_json"] = json.dumps(vision_res["tags"], ensure_ascii=False)
-            target_item["description_memo"] = vision_res["description_memo"]
-            target_item["pitch_note"] = vision_res["description_memo"]
             if vision_res.get("pitch_hint"):
                 target_item["pitch_hint"] = vision_res["pitch_hint"]
             if blur_rel:
@@ -341,10 +328,6 @@ def api_vault_analyze_vision():
                 "base_price_usd": step_prices["base_price_usd"],
                 "tripwire_price_usd": step_prices["tripwire_price_usd"],
                 "whale_price_usd": step_prices["whale_price_usd"],
-                "tags": vision_res["tags"],
-                "tags_json": json.dumps(vision_res["tags"], ensure_ascii=False),
-                "description_memo": vision_res["description_memo"],
-                "pitch_note": vision_res["description_memo"],
                 "pitch_hint": vision_res["pitch_hint"],
                 "used_vision": vision_res.get("used_vision", False),
                 "vision_model": vision_res.get("vision_model"),
@@ -406,25 +389,37 @@ def _refine_vault_item_with_vision(
         if image_b64 and vision_model:
             # VL解析（keep_alive 60s でモデルがメモリに居残り→VRAM再ロードを回避）
             display_name = persona.get("display_name", char_id)
-            nickname = persona.get("user_nickname_default", "babe").split("/")[0].strip()
             tone = persona.get("tone_and_style", "Alluring, playful, teasing yet affectionate.")
             media_kind_ja = "動画（先頭1フレーム目のサムネイル静止画）" if is_video else "画像"
             instruction_line = f"\n【追加指示（必ず反映）】{instruction}" if instruction.strip() else ""
             system_prompt = (
-                f"あなたはFanslyクリエイター「{display_name}」専属の優秀な日本人AI営業ディレクター兼ビジュアルアナリストです。\n"
+                f"あなたはFanslyクリエイター「{display_name}」専属の優秀なビジュアルアナリストです。\n"
                 "添付されたPPV素材の画像を隅々まで観察し、**画像に実際に映っている視覚情報のみ**に基づいて、以下のJSONオブジェクトのみを出力してください。\n"
                 "【厳守ルール】\n"
-                "1. 画像に映っていない衣装・場所・ポーズを推測や定型句で捏造しないこと。\n"
-                "2. `tags` は人物の外見・衣装・ポーズ・表情・背景・プレイから具体的な日本語単語を6〜8個抽出すること。\n"
-                "3. `description_memo` は2〜3文の自然な日本語で、1文目で視覚的見どころ、2〜3文目で刺さるファン層と焦らしタイミングを実践的に書くこと。\n"
-                f"4. `pitch_hint` のみ、クリエイター本人（一人称 I/my/me）がファン（{nickname}）へ直接語りかける誘惑的な英語DM文（1〜2文）にすること。"
+                "1. 画像に映っていない衣装・場所・ポーズ（自撮りしていないのに『自撮り』等）を推測や定型句で捏造しないこと。\n"
+                "2. `pitch_hint` は、以下の4つの要素を**具体的な日本語文（3〜4文）**で記述すること:\n"
+                "   a) 【行為】画像に映っている人物が**何をしているか**を最初に一文で明記すること。\n"
+                "   b) 【衣装】着用している衣装を具体的に列挙すること。全裸の場合は「全裸で」と明記すること。\n"
+                "   c) 【露出部位】**見えている敏感部位を具体的に列挙すること**（最重要）。\n"
+                "      - 乳首（見える/隠れている）: 「乳首が見えている」「乳首が隠れている」\n"
+                "      - 陰部（見える/隠れている/モザイク）: 「陰部が見えている」「陰部がモザイク加工されている」\n"
+                "      - 肛門（見える/隠れている）: 「肛門が見えている」\n"
+                "      - 鎖骨・腹・太もも・背中 等其他部位: 「鎖骨と腹が露出している」\n"
+                "      - 部位ごとに「見えている」/「隠れている」/「モザイク」を明確に書くこと。\n"
+                "   d) 【場所・アングル】背景・照明・カメラアングルを具体的に記述すること。\n"
+                "   - 完成DM文ではなく、DM生成LLMへの参考情報として書くこと（三人称の解説文）。\n"
+                "   - 抽象的定型文（「誘惑的な傑作」等）は禁止。\n"
+                "   - ファイル名・内部ID（FYP, vault_003 等）は禁止。\n"
                 f"{instruction_line}\n"
-                '{\n  "tags": [...],\n  "description_memo": "...",\n  "pitch_hint": "..."\n}'
+                "【出力例】\n"
+                "{\n"
+                '  "pitch_hint": "女性がベッドでオナニーしている。全裸で、乳首と陰部が見えている。鎖骨から太ももまでが露出している。暗く暖かい照明の寝室で、上からのアングルで撮影。"\n'
+                "}"
             )
             user_prompt = (
                 f"クリエイター名: {display_name}\n対象素材種別: {media_kind_ja}\n"
                 f"販売階段レベル: Step {ladder_step}\n英語キャラ口調参考: {tone}\n"
-                "添付画像を詳しく観察し、実際の視覚特徴に基づいたJSONのみを出力してください:"
+                "添付画像を詳しく観察し、素材の視覚的特徴（特に露出している敏感部位）を具体的に日本語で説明したJSONのみを出力してください:"
             )
             raw_vision = llm_client._call_vision_generate(
                 vision_model=vision_model,
@@ -433,47 +428,29 @@ def _refine_vault_item_with_vision(
                 image_b64=image_b64,
             )
             parsed = llm_client.extract_json_object(raw_vision or "", default={}) if raw_vision else {}
-            tags = llm_client._clean_vision_tags(parsed.get("tags"))
-            memo = str(parsed.get("description_memo") or parsed.get("pitch_note") or "").strip()
             hint = str(parsed.get("pitch_hint") or "").strip()
             hint = re.sub(r"\s*#[^\s]+", "", hint).strip().strip('"')
-            if tags or memo:
-                tags, memo = llm_client._ensure_japanese_tags_and_memo(
-                    tags=tags, description_memo=memo, step=ladder_step, display_name=display_name
-                )
-            if tags and memo and hint:
-                item["tags"] = tags
-                item["tags_json"] = json.dumps(tags, ensure_ascii=False)
-                item["description_memo"] = memo
-                item["pitch_note"] = memo
+            if hint:
                 item["pitch_hint"] = hint
                 item["visual_status"] = "refined"
                 used_vision = True
-            # VL出力が不完全な場合は案Aで補完
+            # VL出力が空の場合は案Aの pitch_hint で補完
             if not used_vision:
                 draft = llm_client.generate_ppv_draft(
                     char_id=char_id, persona=persona, filename=filename,
                     media_type=media_type, ladder_step=ladder_step,
                     thumbnail_image_path=thumb_path,
                 )
-                if not item.get("description_memo"):
-                    item["description_memo"] = draft.get("description_memo") or ""
-                    item["pitch_note"] = item["description_memo"]
                 if not item.get("pitch_hint"):
                     item["pitch_hint"] = draft.get("pitch_hint") or ""
         else:
-            # VL未導入・画像なし: 案Aの暫定生成のみ（refinedにしない）
+            # VL未導入・画像なし: 案Aの pitch_hint 暫定生成のみ（refinedにしない）
             draft = llm_client.generate_ppv_draft(
                 char_id=char_id, persona=persona, filename=filename,
                 media_type=media_type, ladder_step=ladder_step,
                 thumbnail_image_path=thumb_path,
             )
-            item["description_memo"] = draft.get("description_memo") or item.get("description_memo") or ""
-            item["pitch_note"] = item["description_memo"]
             item["pitch_hint"] = draft.get("pitch_hint") or item.get("pitch_hint") or ""
-            if not item.get("tags"):
-                item["tags"] = draft.get("tags") or []
-                item["tags_json"] = json.dumps(item["tags"], ensure_ascii=False)
         return item
     finally:
         if thumb_tmp and os.path.exists(thumb_tmp):
@@ -536,6 +513,8 @@ def api_vault_batch_vision_refine():
             try:
                 new_it = _refine_vault_item_with_vision(cid, it, persona, vision_model, instruction)
                 if str(new_it.get("visual_status")) == "refined":
+                    # 精査完了 → 自動公開
+                    new_it["is_active"] = True
                     for i, x in enumerate(items):
                         if x.get("ppv_id") == new_it.get("ppv_id"):
                             items[i] = new_it
@@ -566,14 +545,13 @@ def api_vault_batch_vision_refine():
 @vault_bp.route("/api/vault/refine_single", methods=["POST"])
 def api_vault_refine_single():
     """
-    [Visionバッチ・第3段] 1件のPPV素材をVLで再精査する。
-    気に入らなかった memo/pitch を、補足指示(instruction)を付けて再生成。
-    body: { char_id, ppv_id, instruction? }
+    [Visionバッチ] 1件のPPV素材の visual_status を draft に戻す。
+    一括精査ボタンでバッチ処理されるのを待つ。
+    body: { char_id, ppv_id }
     """
     data = (request.get_json(silent=True) or {})
     char_id = str(data.get("char_id") or "").strip()
     ppv_id = str(data.get("ppv_id") or "").strip()
-    instruction = str(data.get("instruction") or "").strip()
     if not char_id or not ppv_id:
         return jsonify({"ok": False, "error": "char_id and ppv_id required"}), 400
 
@@ -582,13 +560,13 @@ def api_vault_refine_single():
     if target is None:
         return jsonify({"ok": False, "error": "PPV item not found"}), 404
 
-    persona = load_dm_persona(char_id)
-    vision_model = llm_client.detect_or_ensure_vision_model(auto_pull=False)
-    new_it = _refine_vault_item_with_vision(char_id, target, persona, vision_model, instruction)
+    # visual_status を draft に戻し、非公開にする
+    target["visual_status"] = "draft"
+    target["is_active"] = False
     # リスト内の該当itemを上書きして保存
     for i, x in enumerate(items):
         if x.get("ppv_id") == ppv_id:
-            items[i] = new_it
+            items[i] = target
             break
     save_vault_items(char_id, items)
 
@@ -596,11 +574,7 @@ def api_vault_refine_single():
         "ok": True,
         "char_id": char_id,
         "ppv_id": ppv_id,
-        "vision_model": vision_model,
-        "visual_status": new_it.get("visual_status"),
-        "tags": new_it.get("tags"),
-        "description_memo": new_it.get("description_memo"),
-        "pitch_hint": new_it.get("pitch_hint"),
+        "visual_status": "draft",
     })
 
 
@@ -698,6 +672,10 @@ def api_vault_upload():
         "body_outfit": _norm_cat_tags(category_tags_raw.get("body_outfit") or category_tags_raw.get("outfit")),
         "situation": _norm_cat_tags(category_tags_raw.get("situation")),
     }
+    # [タグ最低1個必須] tags も category_tags も空の場合は 400 で拒否
+    _all_tags_count = len(tags) + sum(len(v) for v in category_tags.values())
+    if _all_tags_count == 0:
+        return jsonify({"ok": False, "error": "At least one tag is required (tags or category_tags)"}), 400
     is_general = 1 if str(data.get("is_general") or "").lower() in ("1", "true", "yes") else 0
 
     description_memo = str(
@@ -806,8 +784,8 @@ def api_get_master_tags():
     from app.services.tag_matcher import load_master_tags
     data = load_master_tags()
     categories = data.get("categories", {})
-    # fan_wish はPPVチップUIでは不要なので除外
-    out = {k: v for k, v in categories.items() if k in ("play", "body_outfit", "situation")}
+    # 全カテゴリ（play / body_outfit / situation / fan_wish）を返却
+    out = {k: v for k, v in categories.items() if k in ("play", "body_outfit", "situation", "fan_wish")}
     return jsonify({"ok": True, "categories": out})
 
 
@@ -825,8 +803,8 @@ def api_add_master_tag():
     name_ja = str(data.get("name_ja") or tag_id).strip() or tag_id
     llm_hint = str(data.get("llm_hint") or "").strip()
 
-    if category not in ("play", "body_outfit", "situation"):
-        return jsonify({"ok": False, "error": "category must be play, body_outfit, or situation"}), 400
+    if category not in ("play", "body_outfit", "situation", "fan_wish"):
+        return jsonify({"ok": False, "error": "category must be play, body_outfit, situation, or fan_wish"}), 400
     if not tag_id or not _re.fullmatch(r"[a-z0-9_]{1,64}", tag_id):
         return jsonify({"ok": False, "error": "id must match [a-z0-9_]{1,64}"}), 400
 
@@ -895,6 +873,58 @@ def api_delete_master_tag():
 
     load_master_tags(refresh=True)
     return jsonify({"ok": True, "tag_id": tag_id, "category": deleted_category, "message": f"タグ '{tag_id}' を {deleted_category} から削除しました"})
+
+
+@vault_bp.route("/api/tags/master/edit", methods=["POST"])
+def api_edit_master_tag():
+    """マスタータグを編集する。
+    Body: {"id": "tag_id", "name_ja": "新日本語名", "llm_hint": "新LLMヒント"}
+    """
+    import re as _re
+    from app.services.tag_matcher import master_tags_path, load_master_tags
+
+    data = request.get_json(silent=True) or {}
+    tag_id = str(data.get("id") or data.get("tag_id") or "").strip().lower()
+    name_ja = str(data.get("name_ja") or "").strip()
+    llm_hint = str(data.get("llm_hint") or "").strip()
+
+    if not tag_id:
+        return jsonify({"ok": False, "error": "id is required"}), 400
+    if name_ja and not _re.fullmatch(r"[\w\s\-・]{1,64}", name_ja):
+        return jsonify({"ok": False, "error": "name_ja contains invalid characters"}), 400
+
+    path = master_tags_path()
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            tags_data = json.load(f)
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"cannot read master_tags.json: {e}"}), 500
+
+    cats = tags_data.get("categories", {})
+    edited = False
+    for cat_name, cat_data in cats.items():
+        for t in (cat_data.get("tags") or []):
+            if str(t.get("id") or "").strip().lower() == tag_id:
+                if name_ja:
+                    t["name_ja"] = name_ja
+                if llm_hint != "":
+                    t["llm_hint"] = llm_hint
+                edited = True
+                break
+        if edited:
+            break
+
+    if not edited:
+        return jsonify({"ok": False, "error": f"tag id '{tag_id}' not found"}), 404
+
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(tags_data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"cannot write master_tags.json: {e}"}), 500
+
+    load_master_tags(refresh=True)
+    return jsonify({"ok": True, "tag_id": tag_id, "message": f"タグ '{tag_id}' を編集しました"})
 
 
 @vault_bp.route("/api/vault/list", methods=["GET"])

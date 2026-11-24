@@ -789,11 +789,6 @@
       border: 1px solid var(--border);
       align-items: end;
     }
-    .vault-memo-2col {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 6px;
-    }
     .price-cell span { display: block; font-size: 9.5px; color: var(--text-muted); margin-bottom: 2px; white-space: nowrap; }
     .price-cell strong { font-size: 12px; color: #f0abfc; }
 
@@ -836,13 +831,11 @@
     }
 
     .split-2col {
-      flex: 1;
       display: grid;
       grid-template-columns: 1fr 1fr;
-      grid-template-rows: minmax(0, 1fr);
+      /* 箱の高さを2つのブロックのうち大きい方の内容高さに合わせる */
+      grid-template-rows: auto;
       gap: 12px;
-      overflow: hidden;
-      min-height: 0;
     }
     .scroll-panel {
       background: var(--bg-panel);
@@ -1376,7 +1369,6 @@
         border-bottom: 1px solid var(--border);
       }
       .vault-step-prices-row { grid-template-columns: 1fr 1fr; }
-      .vault-memo-2col { grid-template-columns: 1fr; }
     }
 
     /* ===== TICKET-08: PPVモザイク／ぼかし編集モーダル ===== */
@@ -1771,20 +1763,20 @@
 
     <!-- タブ3：キャラ・プラン設定 -->
     <section id="tab-persona" class="tab-pane">
-      <div style="display:flex; justify-content:space-between; align-items:center; flex-shrink:0;">
-        <div style="font-size:13px; font-weight:800; color:#e9d5ff;">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-shrink:0; margin-bottom:10px;">
+        <div style="font-size:14px; font-weight:800; color:#e9d5ff;">
           🎭 編集対象キャラクター: <span id="personaEditingCharLabel" style="color:#f0abfc;">Sylphy-Mia</span>
         </div>
         <button class="btn btn-primary" onclick="saveCharacterConfig()">💾 ペルソナ＆プラン設定を保存</button>
       </div>
 
-      <div class="split-2col">
+      <div class="split-2col" style="gap:14px;">
         <div class="scroll-panel">
-          <h3 style="font-size:13px; color:#d8b4fe; border-bottom:1px solid var(--border); padding-bottom:6px;">
+          <h3 style="font-size:15px; color:#d8b4fe; border-bottom:1px solid var(--border); padding-bottom:8px; margin-bottom:10px;">
             🗣️ DM営業ペルソナ設定 (dm_persona.json)
           </h3>
           <div class="form-group">
-            <label>キャラクター表示名 (display_name)</label>
+            <label style="font-size:12px;">キャラクター表示名 (display_name)</label>
             <input type="text" id="personaDisplayName" class="input-ctrl">
           </div>
           <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px;">
@@ -1871,11 +1863,25 @@
             </div>
           </div>
 
-          <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border); padding-bottom:6px; margin-top:4px;">
-            <h3 style="font-size:13px; color:#7dd3fc;">💳 サブスクプラン階層・アップセル設定 (plans.json)</h3>
+          <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border); padding-bottom:8px; margin-top:4px;">
+            <h3 style="font-size:15px; color:#7dd3fc;">💳 サブスクプラン階層・アップセル設定 (plans.json)</h3>
             <button class="btn btn-sm" onclick="addPlanTierRow()">＋ プラン階層追加</button>
           </div>
-          <div id="plansTiersContainer" style="display:flex; flex-direction:column; gap:10px;"></div>
+          <div id="plansTiersContainer" style="display:flex; flex-direction:column; gap:12px;"></div>
+        </div>
+      </div>
+
+      <!-- 🏷️ マスタータグ管理（v3: 全カテゴリCRUD） -->
+      <div style="margin-top:16px; border-top:1px solid var(--border); padding-top:14px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <h3 style="font-size:13px; color:#d8b4fe; margin:0;">🏷️ マスタータグ管理（master_tags.json）</h3>
+          <button class="btn btn-sm" onclick="loadMasterTagsAdmin()">↻ 再読込</button>
+        </div>
+        <div style="font-size:11px; color:var(--text-muted); margin-bottom:10px;">
+          耳役LLMのタグ分類・PPVスコアリングの基準タグ辞書。追加・削除すると即時反映されます。
+        </div>
+        <div id="masterTagsAdminContainer" style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+          <div style="grid-column:1/-1; text-align:center; padding:24px; color:var(--text-muted); font-size:12px;">読み込み中...</div>
         </div>
       </div>
     </section>
@@ -2035,15 +2041,9 @@
         </div>
 
         <div class="form-group">
-          <label>売り込みメモ・フック文 (日本語 description_memo：どんな見どころか・どう煽ると売れるか)</label>
-          <textarea id="modalPpvDescriptionMemo" class="textarea-ctrl" rows="2"
-            placeholder="黒レースのランジェリーで寝室ベッドから上目遣いで甘える自撮り素材。夜の雑談で雰囲気が盛り上がった時に『今ベッドにいるんだけど秘密の写真見る？』と焦らすと高成約。"></textarea>
-        </div>
-
-        <div class="form-group">
-          <label>英語DM誘い文句ヒント (pitch_hint：AIが英語DM作成時に参照)</label>
-          <textarea id="modalPpvPitchHint" class="textarea-ctrl" rows="2"
-            placeholder="Just recorded this in my bedroom before bed... kind of shy to show you 🖤"></textarea>
+          <label>素材視覚フック説明 (pitch_hint：VLがDM生成LLMに参考情報として渡す日本語視覚描写)</label>
+          <textarea id="modalPpvPitchHint" class="textarea-ctrl" rows="3"
+            placeholder="Black lace lingerie, top-down selfie angle, seductive eye contact, dark bedroom. Tease the contrast between innocent pose and exposed collarbone for lingerie fans."></textarea>
         </div>
       </div>
       <div class="modal-footer">
@@ -2521,7 +2521,7 @@
       });
       if (tabId === "tab-monitoring") refreshMonitoring();
       if (tabId === "tab-vault") { loadVaultList(); loadUnmatchedNeeds(); }
-      if (tabId === "tab-persona") loadCharacterConfigForTab();
+      if (tabId === "tab-persona") { loadCharacterConfigForTab(); loadMasterTagsAdmin(); }
     }
 
     function toggleCharDropdown(e) {
@@ -2613,7 +2613,7 @@
       const tagsHtml = tagsArr.length > 0
         ? tagsArr.map(t => `<span class="tag-chip">#${escapeHtml(t)}</span>`).join("")
         : `<span style="color:var(--text-muted);">タグ未設定</span>`;
-      const memoText = att.description_memo || att.pitch_note || att.pitch_hint || "（売り込みメモ未設定）";
+      const memoText = att.pitch_hint || "（視覚フック未設定）";
       const stepName = att.step_label || (att.ladder_step === 1 ? "Step 1: 導入" : (att.ladder_step === 2 ? "Step 2: 本命" : "Step 3: 超秘蔵"));
 
       card.innerHTML = `
@@ -2632,7 +2632,7 @@
           <div class="tag-chips">${tagsHtml}</div>
         </div>
         <div style="background:#100c1e; border:1px solid var(--border); border-radius:6px; padding:5px 7px; font-size:11px; color:#e2e8f0;">
-          <div style="font-size:10px; color:#d8b4fe; font-weight:700;">📝 売り込みメモ:</div>
+          <div style="font-size:10px; color:#d8b4fe; font-weight:700;">📝 視覚フック:</div>
           <div>${escapeHtml(memoText)}</div>
         </div>
       `;
@@ -3942,6 +3942,9 @@
         const categories = await loadMasterTagsIfNeeded();
         items.forEach(it => {
           const ck = `${it.char_id}__${it.ppv_id}`;
+          // pitch_hint textarea を API の最新値で更新
+          const pa = document.getElementById(`pitch-${ck}`);
+          if (pa && it.pitch_hint) pa.value = it.pitch_hint;
           const ct = it.category_tags || {};
           PPV_TAG_CATEGORIES.forEach(cat => {
             const sel = document.getElementById(`vtag_${cat.key}-${ck}`);
@@ -4233,22 +4236,16 @@
                 </label>
               </div>
 
-              <div class="vault-memo-2col">
-                <div class="form-group">
-                  <label style="font-size:10px;">④ 売り込みメモ (日本語)</label>
-                  <textarea id="memo-${escapeHtml(ck)}" class="textarea-ctrl" rows="2" style="padding:4px 7px; font-size:10.5px;" placeholder="見どころ・煽りタイミング">${escapeHtml(it.description_memo || it.pitch_note || '')}</textarea>
-                </div>
-                <div class="form-group">
-                  <label style="font-size:10px;">⑤ 英語DM誘い文句 (pitch_hint)</label>
-                  <textarea id="pitch-${escapeHtml(ck)}" class="textarea-ctrl" rows="2" style="padding:4px 7px; font-size:10.5px;">${escapeHtml(it.pitch_hint || '')}</textarea>
-                </div>
+              <div class="form-group">
+                <label style="font-size:10px;">④ 素材視覚フック説明 (pitch_hint：DM生成LLMへの参考情報)</label>
+                <textarea id="pitch-${escapeHtml(ck)}" class="textarea-ctrl" rows="3" style="padding:4px 7px; font-size:10.5px;" placeholder="女性がベッドでオナニーしている。全裸で、乳首と陰部が見えている。鎖骨から太ももまでが露出している。暗く暖かい照明の寝室で、上からのアングル。">${escapeHtml(it.pitch_hint || '')}</textarea>
               </div>
 
               <div style="display:flex; gap:6px; margin-top:auto;">
                 <button class="btn btn-sm btn-primary" style="flex:1; justify-content:center;"
                   onclick="saveVaultCard('${escapeHtml(it.char_id)}', '${escapeHtml(it.ppv_id)}', '${escapeHtml(ck)}')">💾 変更保存</button>
                 <button class="btn btn-sm" style="justify-content:center;" title="画像をVLで再解析（補足指示可）"
-                  onclick="openRefineModal('${escapeHtml(it.char_id)}', '${escapeHtml(it.ppv_id)}')">🔁 再解析</button>
+                  onclick="resetToDraft('${escapeHtml(it.char_id)}', '${escapeHtml(it.ppv_id)}')" title="精査待ちに戻して、一括精査で再生成">🔄 精査待ち</button>
                 <button class="btn btn-sm btn-danger"
                   onclick="deleteVaultCard('${escapeHtml(it.char_id)}', '${escapeHtml(it.ppv_id)}')">🗑️ 削除</button>
               </div>
@@ -4297,7 +4294,6 @@
         tags: [selectedTags.play, selectedTags.body_outfit, selectedTags.situation].flat().join(", "),
         category_tags: selectedTags,
         is_general: isGeneral,
-        description_memo: document.getElementById(`memo-${cardKey}`)?.value || "",
         pitch_hint: document.getElementById(`pitch-${cardKey}`).value,
       };
       const res = await fetch("/api/vault/update", {
@@ -4359,57 +4355,23 @@
       }
     }
 
-    // 単品再精査ダイアログ（補足指示入力）
-    function openRefineModal(charId, ppvId) {
-      const existing = document.getElementById("refineModal");
-      if (existing) existing.remove();
-      const modal = document.createElement("div");
-      modal.id = "refineModal";
-      modal.className = "redact-modal-backdrop open";
-      modal.innerHTML = `
-        <div style="background:var(--bg-panel); border:1px solid var(--border); border-radius:12px; padding:20px 22px; width:420px; max-width:92vw;">
-          <h3 style="margin:0 0 6px; font-size:14px; color:#e9d5ff;">🔁 PPV画像をVLで再解析</h3>
-          <p style="font-size:11px; color:var(--text-muted); margin:0 0 12px; line-height:1.5;">
-            ${escapeHtml(charId)} / ${escapeHtml(ppvId)}<br>
-            補足指示（任意）：気に入らなかった点を指定すると、その方向で memo・pitch_hint を再生成します。<br>
-            例: 「衣装に焦点を当てて」「もっと過激な表現で」「寝室の雰囲気を強調して」
-          </p>
-          <textarea id="refineInstruction" class="textarea-ctrl" rows="3" style="width:100%; font-size:12px; padding:8px;"
-            placeholder="（補足指示を入力。空欄ならデフォルトで再生成）"></textarea>
-          <div style="display:flex; gap:8px; margin-top:14px;">
-            <button class="btn btn-primary" style="flex:1;" onclick="confirmRefine('${escapeHtml(charId)}', '${escapeHtml(ppvId)}')">✅ 再解析実行</button>
-            <button class="btn" onclick="document.getElementById('refineModal').remove()">キャンセル</button>
-          </div>
-        </div>
-      `;
-      modal.addEventListener("click", (e) => { if (e.target === modal) modal.remove(); });
-      document.body.appendChild(modal);
-    }
-
-    async function confirmRefine(charId, ppvId) {
-      const instruction = (document.getElementById("refineInstruction")?.value || "").trim();
-      const modal = document.getElementById("refineModal");
-      if (modal) { modal.style.opacity = "0.5"; modal.style.pointerEvents = "none"; }
-      showToast("🔁 画像をVLで再解析中…");
+    // 単品を精査待ち（draft）に戻す
+    async function resetToDraft(charId, ppvId) {
       try {
         const res = await fetch("/api/vault/refine_single", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ char_id: charId, ppv_id: ppvId, instruction }),
+          body: JSON.stringify({ char_id: charId, ppv_id: ppvId }),
         });
         const data = await res.json();
         if (data.ok) {
-          const status = data.visual_status === "refined" ? "画像精査済み" : "暫定生成（VL未使用）";
-          showToast(`✅ ${ppvId} を再解析しました（${status}）`);
-          if (modal) modal.remove();
+          showToast(`🔄 ${ppvId} を精査待ちに戻しました。一括精査を実行してください。`);
           loadVaultList();
         } else {
-          showToast(`❌ 再解析失敗: ${data.error || "unknown"}`, true);
-          if (modal) { modal.style.opacity = "1"; modal.style.pointerEvents = "auto"; }
+          showToast(`❌ 失敗: ${data.error || "unknown"}`, true);
         }
       } catch (e) {
-        showToast(`❌ 再解析エラー: ${e}`, true);
-        if (modal) { modal.style.opacity = "1"; modal.style.pointerEvents = "auto"; }
+        showToast(`❌ エラー: ${e}`, true);
       }
     }
 
@@ -4860,7 +4822,7 @@
         </div>
         <div class="profile-section">
           <h4>💎 PPV 推薦（機械選定）</h4>
-          ${rec ? `<div><span class="ppv-jump-link" onclick="jumpToVaultItem('${escapeHtml(charId)}', '${escapeHtml(rec.ppv_id)}', '${escapeHtml(recFname)}')">💎 ${escapeHtml(recFname)} ↗</span> (Step ${rec.ladder_step}) • <strong style="color:#4ade80;">$${Number(rec.offered_price_usd || 0).toFixed(2)}</strong><br><span style="color:#e2e8f0;">${escapeHtml(rec.description_memo || rec.pitch_hint || '')}</span></div>` : `<div>推薦PPVなし</div>`}
+          ${rec ? `<div><span class="ppv-jump-link" onclick="jumpToVaultItem('${escapeHtml(charId)}', '${escapeHtml(rec.ppv_id)}', '${escapeHtml(recFname)}')">💎 ${escapeHtml(recFname)} ↗</span> (Step ${rec.ladder_step}) • <strong style="color:#4ade80;">$${Number(rec.offered_price_usd || 0).toFixed(2)}</strong><br><span style="color:#e2e8f0;">${escapeHtml(rec.pitch_hint || '')}</span></div>` : `<div>推薦PPVなし</div>`}
         </div>
         <div class="profile-section">
           <h4>🧠 顧客カルテ（構造化長期記憶）</h4>
@@ -4968,7 +4930,6 @@
       const tripPrice = document.getElementById("modalPpvTripwirePrice").value;
       const basePrice = document.getElementById("modalPpvBasePrice").value;
       const whalePrice = document.getElementById("modalPpvWhalePrice").value;
-      const descMemo = document.getElementById("modalPpvDescriptionMemo")?.value || "";
       const pitch = document.getElementById("modalPpvPitchHint").value;
       const isGeneral = document.getElementById("modalPpvIsGeneral")?.checked ? "1" : "0";
       const categoryTags = buildCategoryTagsPayloadFromModal();
@@ -4982,7 +4943,6 @@
       formData.append("base_price_usd", basePrice);
       formData.append("whale_price_usd", whalePrice);
       formData.append("tags", tagsCsv);
-      formData.append("description_memo", descMemo);
       formData.append("pitch_hint", pitch);
       formData.append("is_general", isGeneral);
       formData.append("category_tags", JSON.stringify(categoryTags));
@@ -6193,6 +6153,127 @@
           ${ppvHtml}
         </div>
       `;
+    }
+
+    // ─── マスタータグ管理 (master_tags.json CRUD) ───
+
+    const MASTER_TAG_CATEGORIES = [
+      { key: "play", label: "🎮 プレイ・属性", color: "#f472b6" },
+      { key: "body_outfit", label: "👗 パーツ・衣装", color: "#a78bfa" },
+      { key: "situation", label: "📍 シチュエーション", color: "#7dd3fc" },
+      { key: "fan_wish", label: "📊 未登録ファン要望", color: "#facc15" }
+    ];
+
+    async function loadMasterTagsAdmin() {
+      const container = document.getElementById("masterTagsAdminContainer");
+      try {
+        const res = await fetch("/api/tags/master");
+        const data = await res.json();
+        if (!data.ok) { container.innerHTML = `<div style="grid-column:1/-1;color:#f87171;font-size:12px;">エラー: ${data.error}</div>`; return; }
+        let html = "";
+        for (const cat of MASTER_TAG_CATEGORIES) {
+          const catData = data.categories[cat.key] || { tags: [] };
+          const tags = catData.tags || [];
+          html += `<div style="background:var(--bg-input); border:1px solid var(--border); border-radius:8px; padding:10px;">`;
+          html += `<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">`;
+          html += `<span style="font-size:12px; font-weight:700; color:${cat.color};">${cat.label}（${tags.length}個）</span>`;
+          html += `</div>`;
+          html += `<div style="display:flex; flex-direction:column; gap:4px; max-height:200px; overflow-y:auto; margin-bottom:8px;">`;
+          if (tags.length === 0) {
+            html += `<div style="font-size:11px; color:var(--text-muted); text-align:center; padding:8px;">（タグなし）</div>`;
+          } else {
+            for (const t of tags) {
+              html += `<div style="display:flex; justify-content:space-between; align-items:center; background:rgba(0,0,0,0.2); border-radius:5px; padding:4px 8px; font-size:11px;">`;
+              html += `<span style="color:#e2e8f0;"><code style="color:${cat.color};">${escapeHtml(t.id)}</code> <span style="color:var(--text-muted);">${escapeHtml(t.name_ja)}</span></span>`;
+              html += `<span style="display:flex; gap:4px;">`;
+              html += `<button class="btn btn-sm" style="height:22px; font-size:10px; padding:0 6px;" onclick="editMasterTag('${t.id}', ${JSON.stringify(JSON.stringify(t.name_ja))}, ${JSON.stringify(JSON.stringify(t.llm_hint || ""))})" title="編集">✏️</button>`;
+              html += `<button class="btn btn-sm" style="height:22px; font-size:10px; padding:0 6px; color:#f87171;" onclick="deleteMasterTag('${t.id}')" title="削除">🗑️</button>`;
+              html += `</span>`;
+              html += `</div>`;
+            }
+          }
+          html += `</div>`;
+          // 追加フォーム
+          html += `<div style="display:grid; grid-template-columns:1fr 1fr 1fr auto; gap:4px; align-items:end;">`;
+          html += `<div><label style="font-size:10px; color:var(--text-muted);">ID（英字・_）</label><input type="text" id="mtNewId_${cat.key}" class="input-ctrl" style="height:26px; font-size:11px;" placeholder="tag_id"></div>`;
+          html += `<div><label style="font-size:10px; color:var(--text-muted);">日本語名</label><input type="text" id="mtNewJa_${cat.key}" class="input-ctrl" style="height:26px; font-size:11px;" placeholder="日本語名"></div>`;
+          html += `<div><label style="font-size:10px; color:var(--text-muted);">LLM ヒント（英語キーワード）</label><input type="text" id="mtNewHint_${cat.key}" class="input-ctrl" style="height:26px; font-size:11px;" placeholder="keyword1, keyword2, ..."></div>`;
+          html += `<button class="btn btn-sm btn-primary" style="height:26px; font-size:11px;" onclick="addMasterTag('${cat.key}')">＋ 追加</button>`;
+          html += `</div>`;
+          html += `</div>`;
+        }
+        container.innerHTML = html;
+      } catch (e) {
+        container.innerHTML = `<div style="grid-column:1/-1;color:#f87171;font-size:12px;">読み込みエラー: ${e.message}</div>`;
+      }
+    }
+
+    async function addMasterTag(category) {
+      const id = (document.getElementById(`mtNewId_${category}`)?.value || "").trim().toLowerCase();
+      const nameJa = (document.getElementById(`mtNewJa_${category}`)?.value || "").trim();
+      const llmHint = (document.getElementById(`mtNewHint_${category}`)?.value || "").trim();
+      if (!id) { alert("ID を入力してください"); return; }
+      if (!nameJa) { alert("日本語名を入力してください"); return; }
+      try {
+        const res = await fetch("/api/tags/master/add", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ category, id, name_ja: nameJa, llm_hint: llmHint })
+        });
+        const data = await res.json();
+        if (data.ok) {
+          alert(data.message);
+          loadMasterTagsAdmin();
+        } else {
+          alert(data.error || "追加に失敗しました");
+        }
+      } catch (e) {
+        alert("通信エラー: " + e.message);
+      }
+    }
+
+    async function deleteMasterTag(tagId) {
+      if (!confirm(`タグ '${tagId}' を削除しますか？`)) return;
+      try {
+        const res = await fetch("/api/tags/master/delete", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: tagId })
+        });
+        const data = await res.json();
+        if (data.ok) {
+          alert(data.message);
+          loadMasterTagsAdmin();
+        } else {
+          alert(data.error || "削除に失敗しました");
+        }
+      } catch (e) {
+        alert("通信エラー: " + e.message);
+      }
+    }
+
+    function editMasterTag(tagId, nameJaJson, llmHintJson) {
+      const nameJa = JSON.parse(nameJaJson);
+      const llmHint = JSON.parse(llmHintJson);
+      const newName = prompt("日本語名（空欄で変更なし）:", nameJa);
+      if (newName === null) return;
+      const newHint = prompt("LLM ヒント（空欄で変更なし）:", llmHint);
+      if (newHint === null) return;
+      const payload = { id: tagId };
+      if (newName.trim() && newName.trim() !== nameJa) payload.name_ja = newName.trim();
+      if (newHint.trim() !== llmHint) payload.llm_hint = newHint.trim();
+      if (!payload.name_ja && !payload.llm_hint) { alert("変更がありません"); return; }
+      fetch("/api/tags/master/edit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      })
+      .then(r => r.json())
+      .then(data => {
+        if (data.ok) { alert(data.message); loadMasterTagsAdmin(); }
+        else { alert(data.error || "編集に失敗しました"); }
+      })
+      .catch(e => alert("通信エラー: " + e.message));
     }
 
     window.addEventListener("DOMContentLoaded", initApp);

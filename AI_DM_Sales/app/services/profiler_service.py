@@ -504,12 +504,15 @@ def classify_fan_intent_and_tags(
         "Never invent ids. Empty array if none.\n"
         "2. has_buy_intent: true ONLY if the fan explicitly asks to see/buy/unlock content "
         "(e.g. 'show me', 'how much', 'want to buy', 'send it').\n"
-        "3. unmatched_needs: English keywords for fetishes/outfits/situations the fan wants that are "
-        "NOT in the candidate tag list. If the fan wants NEW content that has no existing PPV, "
+        "3. unmatched_needs: Japanese keywords (2-6 chars) describing visual features the fan wants "
+        "(e.g. 全裸, オナニー, 濡れ, 密着, 吐息, 黒レース, 寝室). "
+        "Include ALL visual/feature keywords the fan mentions, whether or not they exist in the candidate tag list. "
+        "These are used to match against PPV pitch_hint text. "
+        "If the fan wants NEW content that has no existing PPV, "
         "ALSO add the tag id 'fan_wish' to matched_tags so the system can log it as an unmatched need.\n"
         "4. reasoning_ja: one short Japanese sentence explaining the decision.\n"
         "Output JSON schema:\n"
-        '{"matched_tags": ["lingerie", "fan_wish"], "has_buy_intent": true, "unmatched_needs": ["glasses"], "reasoning_ja": "..."}'
+        '{"matched_tags": ["lingerie", "fan_wish"], "has_buy_intent": true, "unmatched_needs": ["全裸", "オナニー", "寝室"], "reasoning_ja": "..."}'
     )
     user_prompt = (
         f"Candidate master tags (id (ja_name): llm_hint):\n{tag_block}\n\n"

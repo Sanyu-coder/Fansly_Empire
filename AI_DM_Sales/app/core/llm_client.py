@@ -197,12 +197,12 @@ class LLMClient:
     """
 
     VISION_MODEL_PRIORITY = [
+        "qwen3-vl",
+        "qwen3vl",
         "qwen2.5vl:7b",
         "qwen2.5vl:3b",
         "qwen2.5vl",
         "qwen2.5-vl",
-        "qwen3-vl",
-        "qwen3vl",
         "qwen2-vl",
         "qwen2vl",
         "minicpm-v",
@@ -616,9 +616,9 @@ class LLMClient:
         # [案A] 素材固有pitch: ファイル名意味辞書の英語フレーズを一人称DMに組み込む
         _sem_pitch = " ".join(semantic_pitches[:2]) if semantic_pitches else ""
         step_fallback_pitch = {
-            1: f"Just took this private {media_type} before bed..." + (f" {_sem_pitch}." if _sem_pitch else " in my bedroom.") + f" kind of shy to show you {nickname} 🖤👀",
-            2: f"The uncensored version of what I teased earlier..." + (f" {_sem_pitch}." if _sem_pitch else "") + f" way too hot for my public feed, only unlocking this for my favorite {nickname} 😈💋",
-            3: f"My most forbidden Step 3 vault secret..." + (f" {_sem_pitch}." if _sem_pitch else "") + f" I never show this to regular followers. Promise you'll keep it just between us, {nickname}? 🖤🔥",
+            1: "女性が寝室でポーズを取っている。ランジェリーを着用し、鎖骨と腹が露出している。暗い照明の寝室で、自撮りアングル。",
+            2: "女性がベッドでオナニーしている。全裸で、乳首と陰部が見えている。鎖骨から太ももまでが露出している。暖かい照明の寝室で、上からのアングル。",
+            3: "女性がベッドで絶頂している。全裸で、乳首と陰部と肛門が見えている。全身が露出している。暗い照明の寝室で、密着アングル。",
         }
         fallback_data = {
             "tags": base_tags,
@@ -627,35 +627,34 @@ class LLMClient:
         }
 
         system_prompt = (
-            f"あなたはFanslyクリエイター「{display_name}」の専属AI営業ディレクターです。\n"
+            f"あなたはFanslyクリエイター「{display_name}」の専属ビジュアルアナリストです。\n"
             f"Character tone: {tone}\n"
-            "PPV素材のファイル名と階段ステップ（1=導入チラ見せ, 2=本命無修正, 3=超秘蔵VIP）から、以下のJSONのみを出力してください:\n"
-            '{"tags": ["日本語の具体的属性タグ1", "タグ2", "タグ3", "タグ4", "タグ5"], '
-            '"description_memo": "どんなシチュエーション・見どころの素材か、どのタイミングでどう煽ると売れるかの自然な日本語売り込みメモ（2文程度）", '
-            '"pitch_hint": "One seductive English DM sentence teasing this media in character"}'
+            "PPV素材のファイル名と階段ステップ（1=導入チラ見せ, 2=本命無修正, 3=超秘蔵VIP）から、"
+            "素材の視覚的特徴（行為・衣装・露出部位・アングル・背景など）を**日本語で具体的に描写**し、"
+            "**素材フック説明（3〜4文）**を出力してください。\n"
+            "【記述ルール】\n"
+            "1. 【行為】ファイル名から推測される行為を最初に一文で明記（例: 「女性がベッドでオナニーしている」）。\n"
+            "2. 【衣装】ファイル名から推測される衣装を列挙（例: 「黒いレースブラとストッキングを着用」/「全裸で」）。\n"
+            "3. 【露出部位】推測される露出部位を具体的に列挙（例: 「乳首と陰部が見えている」「鎖骨と腹が露出している」）。\n"
+            "4. 【場所・アングル】ファイル名から推測される場所・アングルを記述（例: 「寝室で、上からのアングル」）。\n"
+            "【出力形式】以下のJSON形式で出力してください（pitch_hint キーのみ。他のキーは禁止）:\n"
+            '{"pitch_hint": "3-4文の日本語視覚フック説明（行為・衣装・露出部位・場所・アングル）"}\n'
+            "【厳守ルール】\n"
+            "1. 完成DM文ではなく、DM生成LLMへの参考情報として書くこと（三人称の解説文）。\n"
+            "2. 抽象的定型文（「誘惑的な傑作」等）は禁止。具体的な視覚特徴を列挙すること。\n"
+            "3. ファイル名・内部ID（FYP, vault_003 等）は禁止。\n"
+            "4. pitch_hint キー以外のキーを出力しないこと。"
         )
         user_prompt = (
-            f"Filename: {filename}\n"
-            f"Media Type: {media_type}\n"
-            f"Ladder Step: Step {step}\n"
-            "Generate JSON now:"
+            f"ファイル名: {filename}\n"
+            f"素材種別: {media_type}\n"
+            f"階段ステップ: Step {step}\n"
+            "JSONを出力してください:"
         )
 
-        result = self.generate_json(system_prompt, user_prompt, default_data=fallback_data)
-        tags = result.get("tags")
-        if not isinstance(tags, list) or not tags:
-            tags = fallback_data["tags"]
-        else:
-            tags = [str(t).strip().lstrip("#") for t in tags if str(t).strip()][:8]
-
-        description_memo = str(
-            result.get("description_memo") or result.get("pitch_note") or fallback_data["description_memo"]
-        ).strip()
+        result = self.generate_json(system_prompt, user_prompt, default_data={"pitch_hint": fallback_data["pitch_hint"]})
         pitch_hint = str(result.get("pitch_hint") or "").strip() or fallback_data["pitch_hint"]
         return {
-            "tags": tags,
-            "description_memo": description_memo,
-            "pitch_note": description_memo,
             "pitch_hint": pitch_hint,
         }
 
@@ -1229,17 +1228,32 @@ class LLMClient:
             media_kind_ja = "動画（先頭1フレーム目のサムネイル静止画）" if is_video else "画像"
 
             system_prompt = (
-                f"あなたはFanslyクリエイター「{display_name}」専属の優秀な日本人AI営業ディレクター兼ビジュアルアナリストです。\n"
+                f"あなたはFanslyクリエイター「{display_name}」専属の優秀なビジュアルアナリストです。\n"
                 "添付されたPPV素材の画像を隅々まで観察し、**画像に実際に映っている視覚情報のみ**に基づいて、以下のJSONオブジェクトのみを出力してください。\n"
                 "【厳守ルール】\n"
                 "1. 画像に映っていない衣装・場所・ポーズ（自撮りしていないのに『自撮り』等）を推測や定型句で捏造しないこと。\n"
-                "2. `tags` は、人物の外見特徴（髪色・髪型・耳や角や帽子等の装飾）、衣装（種類・色・素材・露出部位）、ポーズ・構図・アングル、表情・視線、背景・場所、プレイや雰囲気から具体的な日本語単語を6〜8個抽出すること（英単語・ローマ字・ファイル名記号は禁止）。\n"
-                "3. `description_memo` は2〜3文の自然な日本語で記述すること。1文目で『どんな外見・衣装・ポーズ・表情・シチュエーションで何が視覚的な見どころか』を具体的に描写し、2〜3文目で『どんなフェチ・好みのファンに刺さり、会話のどのタイミングでどう焦らして提案すると高確率で売れるか』を実践的に書くこと（「この衣装とシチュエーションは最適なタイミングです」のような抽象的な定型文は禁止）。\n"
-                f"4. `pitch_hint` のみ、クリエイター本人（一人称 I / my / me）がファン（{nickname}）へ直接語りかける誘惑的な英語DM文（1〜2文）にすること（三人称の解説文やハッシュタグは禁止）。\n"
+                "2. `pitch_hint` は、以下の4つの要素を**具体的な日本語文（3〜4文）**で記述すること:\n"
+                "   a) 【行為】画像に映っている人物が**何をしているか**を最初に一文で明記すること。\n"
+                "      例: 「女性がベッドでオナニーしている」「女性が浴槽に座っている」「男性が寝室で服を脱いでいる」\n"
+                "      - 行為が不明な場合は「女性がポーズを取っている」のように中立的に書くこと。\n"
+                "   b) 【衣装】着用している衣装を具体的に列挙すること。\n"
+                "      例: 「黒いレースブラと太ももまでのストッキングを着用」\n"
+                "      - 全裸の場合は「全裸で」と明記すること。\n"
+                "   c) 【露出部位】**見えている敏感部位を具体的に列挙すること**（最重要）。\n"
+                "      必ず以下を確認して、映っているもののみを明記すること:\n"
+                "      - 乳首（見える/隠れている）: 「乳首が見えている」「乳首が隠れている」\n"
+                "      - 陰部（見える/隠れている/モザイク）: 「陰部が見えている」「陰部がモザイク加工されている」\n"
+                "      - 肛門（見える/隠れている）: 「肛門が見えている」\n"
+                "      - 鎖骨・腹・太もも・背中 等其他部位: 「鎖骨と腹が露出している」「背中が露出している」\n"
+                "      - 部位ごとに「見えている」/「隠れている」/「モザイク」を明確に書くこと。\n"
+                "   d) 【場所・アングル】背景・照明・カメラアングルを具体的に記述すること。\n"
+                "      例: 「暗く暖かい照明の寝室で、上からのアングル」\n"
+                "   - 完成DM文ではなく、DM生成LLMへの参考情報として書くこと（三人称の解説文）。\n"
+                "   - 抽象的定型文（「誘惑的な傑作」「親密な挑発的な雰囲気」等）は禁止。\n"
+                "   - ファイル名・内部ID（FYP, vault_003 等）は禁止。\n"
+                "【出力例】\n"
                 "{\n"
-                '  "tags": ["衣装や色の特徴", "髪色や耳・装飾の特徴", "ポーズや構図", "表情や視線", "場所や背景の雰囲気", "シチュエーションやプレイ属性"],\n'
-                '  "description_memo": "1文目で具体的な視覚的見どころを描写し、2〜3文目で刺さるファン層と効果的な焦らし・提案タイミングを解説した自然な日本語メモ",\n'
-                '  "pitch_hint": "1-2 seductive first-person (I/my/me) English DM sentences teasing this content"\n'
+                '  "pitch_hint": "女性がベッドでオナニーしている。全裸で、乳首と陰部が見えている。鎖骨から太ももまでが露出している。暗く暖かい照明の寝室で、上からのアングルで撮影。"\n'
                 "}"
             )
             user_prompt = (
@@ -1247,7 +1261,7 @@ class LLMClient:
                 f"対象素材種別: {media_kind_ja}\n"
                 f"販売階段レベル: {step_desc_map.get(step, step_desc_map[1])}\n"
                 f"英語キャラ口調参考: {tone}\n"
-                "添付画像を詳しく観察し、例示プレースホルダは残さず実際の視覚特徴に基づいたJSONのみを出力してください:"
+                "添付画像を詳しく観察し、素材の視覚的特徴（特に露出している敏感部位）を具体的に日本語で説明したJSONのみを出力してください:"
             )
 
             raw_vision = self._call_vision_generate(
@@ -1258,26 +1272,10 @@ class LLMClient:
             )
             parsed = self.extract_json_object(raw_vision or "", default={}) if raw_vision else {}
 
-            tags = self._clean_vision_tags(parsed.get("tags"))
-            description_memo = str(
-                parsed.get("description_memo")
-                or parsed.get("pitch_note")
-                or parsed.get("memo")
-                or ""
-            ).strip()
             pitch_hint = str(parsed.get("pitch_hint") or "").strip()
             pitch_hint = re.sub(r"\s*#[^\s]+", "", pitch_hint).strip().strip('"')
 
-            if tags or description_memo:
-                tags, description_memo = self._ensure_japanese_tags_and_memo(
-                    tags=tags,
-                    description_memo=description_memo,
-                    step=step,
-                    display_name=display_name,
-                )
-
-            fallback_draft: Optional[Dict[str, Any]] = None
-            if not tags or not description_memo or not pitch_hint:
+            if not pitch_hint:
                 fallback_draft = self.generate_ppv_draft(
                     char_id=char_id,
                     persona=persona,
@@ -1285,17 +1283,9 @@ class LLMClient:
                     media_type="video" if is_video else "image",
                     ladder_step=step,
                 )
-                if not tags:
-                    tags = fallback_draft["tags"]
-                if not description_memo:
-                    description_memo = fallback_draft["description_memo"]
-                if not pitch_hint:
-                    pitch_hint = fallback_draft["pitch_hint"]
+                pitch_hint = fallback_draft["pitch_hint"]
 
             return {
-                "tags": tags,
-                "description_memo": description_memo,
-                "pitch_note": description_memo,
                 "pitch_hint": pitch_hint,
                 "used_vision": bool(raw_vision and parsed),
                 "vision_model": vision_model,

@@ -145,6 +145,7 @@ def match_ppv_deterministic(
     ladder_step: int,
     is_rescue: bool = False,
     db_path: Optional[str] = None,
+    free_keywords: Optional[List[str]] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     決定論的 PPV 選定。
@@ -159,6 +160,8 @@ def match_ppv_deterministic(
         対象 ladder_step のPPVを1件確定。一致在庫がなければ None。
     """
     matched = [str(t).strip().lstrip("#") for t in (matched_tags or []) if str(t).strip()]
+    # 自由語（耳役LLMが抽出した視覚特徴キーワード）をマッチング対象に追加
+    free_kws = [str(k).strip() for k in (free_keywords or []) if str(k).strip()]
 
     vault = get_ppv_vault_records_db(char_id, db_path=db_path)
     if not vault:
@@ -220,20 +223,25 @@ def match_ppv_deterministic(
         chosen = min(step_pool, key=lambda r: (int(r.get("ladder_step") or 1), str(r.get("ppv_id") or "")))
         return dict(chosen)
 
-    # 通常ルート: matched_tags と PPV タグの一致数をスコア化
+    # 通常ルート: 2層スコアリング（category_tags×2 + pitch_hintキーワード×1）
     scored: List[Dict[str, Any]] = []
     for rec in candidates:
-        rec_tags = set(_parse_category_tags(rec))
-        overlap = len(rec_tags & set(matched))
-        if overlap == 0:
+        # Layer 1: category_tags（手動・確信度高）→ 1個あたり +2
+        rec_cat_tags = set(_parse_category_tags(rec))
+        cat_overlap = len(rec_cat_tags & set(matched))
+        # Layer 2: pitch_hint 文中に free_keywords（自由語）が部分一致 → 1個あたり +1
+        hint = str(rec.get("pitch_hint") or "")
+        hint_overlap = sum(1 for kw in free_kws if kw and kw in hint)
+        score = cat_overlap * 2 + hint_overlap * 1
+        if score == 0:
             continue
-        scored.append({"rec": rec, "score": overlap})
+        scored.append({"rec": rec, "score": score, "cat": cat_overlap, "hint": hint_overlap})
 
     if not scored:
         return None
 
-    # スコア降順、同点なら ladder_step が近いもの、最後に ppv_id で決定論的ソート
-    scored.sort(key=lambda x: (-x["score"], abs(int(x["rec"].get("ladder_step") or 1) - int(ladder_step)), str(x["rec"].get("ppv_id") or "")))
+    # スコア降順、同点なら cat_overlap 降順、次に ladder_step が近いもの、最後に ppv_id
+    scored.sort(key=lambda x: (-x["score"], -x["cat"], abs(int(x["rec"].get("ladder_step") or 1) - int(ladder_step)), str(x["rec"].get("ppv_id") or "")))
     return dict(scored[0]["rec"])
 
 
