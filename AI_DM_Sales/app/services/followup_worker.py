@@ -201,8 +201,8 @@ class FollowupWorker:
             )
         except LLMResilientRetryExhaustedError:
             msg_en = fallback_en
-        msg_ja = self.llm.translate_to_japanese(msg_en) if msg_en != fallback_en else fallback_ja
-        return {"en": msg_en, "ja": msg_ja}
+        # [オンデマンド翻訳] 追撃DMの日本語訳は生成せず空で返す（表示時生成・キャッシュ化）
+        return {"en": msg_en, "ja": ""}
 
     def process_unopened_ppv_reminders(
         self,
@@ -382,8 +382,8 @@ class FollowupWorker:
             )
         except LLMResilientRetryExhaustedError:
             msg_en = fallback_en
-        msg_ja = self.llm.translate_to_japanese(msg_en) if msg_en != fallback_en else fallback_ja
-        return {"en": msg_en, "ja": msg_ja}
+        # [オンデマンド翻訳] Step2追撃DMの日本語訳は生成せず空で返す（表示時生成・キャッシュ化）
+        return {"en": msg_en, "ja": ""}
 
     def process_step2_followups(
         self,

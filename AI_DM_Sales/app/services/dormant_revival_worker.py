@@ -130,10 +130,10 @@ def generate_personalized_revival_dm(
         logger.warning("dormant_revival: Ollama 20回リトライでも復旧せずフォールバックへ")
         msg_en = fallback_en
 
-    msg_ja = client.translate_to_japanese(msg_en)
+    # [オンデマンド翻訳] 復活DMの日本語訳は生成せず空で返す（表示時生成・キャッシュ化）
     return {
         "content": msg_en,
-        "content_ja": msg_ja,
+        "content_ja": "",
         "prompt_version": f"v{playbook.get('version_id', 1)}-{ab_group}-revival",
     }
 

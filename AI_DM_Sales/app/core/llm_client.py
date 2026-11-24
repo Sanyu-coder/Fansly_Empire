@@ -301,15 +301,64 @@ class LLMClient:
         temperature: float = 0.7,
         max_tokens: int = 512,
         json_mode: bool = False,
+        base_url: Optional[str] = None,
+        model_name: Optional[str] = None,
     ) -> Optional[str]:
         """
         Qwen3系モデルで <think> によるトークン枯渇・タイムアウトを防ぐため、
         まず Ollama ネイティブ /api/generate に think=False で高速リクエストし、
         失敗時のみ /v1/chat/completions へフォールバックする。
+
+        base_url / model_name を渡すと llama.cpp サーバー (OpenAI 互換) 経路で
+        推論する。Ollama 経路では base_url=None, model_name=None を維持。
+        llama.cpp は /api/generate (Ollamaネイティブ) を持たないため、
+        base_url 指定時は直接 /v1/chat/completions へリクエストする。
         """
+        eff_base = (base_url or self.base_url).rstrip("/")
+        eff_model = model_name or self.model_name
+
+        # llama.cpp 経路: /api/generate (Ollamaネイティブ) 非対応のため、
+        # 直接 OpenAI 互換 /v1/chat/completions へリクエストする
+        if base_url is not None and base_url != self.base_url:
+            endpoint = f"{eff_base}/chat/completions"
+            payload = {
+                "model": eff_model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": f"/no_think\n{user_prompt}"},
+                ],
+                "temperature": temperature,
+                "max_tokens": max(max_tokens, 800),
+                "stream": False,
+            }
+            if json_mode:
+                payload["response_format"] = {"type": "json_object"}
+            data = json.dumps(payload).encode("utf-8")
+            req = urllib.request.Request(
+                endpoint,
+                data=data,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            # llama.cpp は通常 1秒以内で応答。10秒超えたら VRAM 競合・応答不能と判断して
+            # 速やかに Ollama/辞書フォールバックへ落す（UI の 1秒_STOP 回避）。
+            llama_timeout = min(self.timeout, 10.0)
+            try:
+                with urllib.request.urlopen(req, timeout=llama_timeout) as resp:
+                    body = json.loads(resp.read().decode("utf-8"))
+                    choices = body.get("choices") or []
+                    if choices:
+                        content = choices[0].get("message", {}).get("content", "")
+                        cleaned = self.strip_think_tags(content)
+                        if cleaned:
+                            return cleaned
+            except Exception:
+                pass
+            return None
+
         native_url = self._get_native_generate_url()
         native_payload: Dict[str, Any] = {
-            "model": self.model_name,
+            "model": eff_model,
             "system": system_prompt,
             "prompt": user_prompt,
             "think": False,
@@ -384,19 +433,37 @@ class LLMClient:
         max_tokens: int = 512,
         fallback_text: str = "",
         priority: int = Priority.HIGH,
+        use_llama: bool = True,
+        llama_fallback_to_ollama: bool = True,
     ) -> str:
         """
         テキスト生成（Ticket 2.1: PriorityLock で直列化）。
         - priority=Priority.HIGH: リアルタイムDM返信生成・耳役タグ分類（デフォルト）
         - priority=Priority.LOW:  バックグラウンド facts / conversation_summary 更新
+        - use_llama=True（デフォルト）: 優先的に llama.cpp (config.LLAMA_BASE_URL) を使い、
+          応答不能・空のときのみ Ollama (self.base_url) へフォールバック。
+        - llama_fallback_to_ollama=False: llama.cpp 応答不能・空のとき Ollama（5秒程度）に
+          落ちずに即 fallback_text（辞書フォールバック）へ落す。翻訳系は True（品質維持）、
+          即時性が必要な翻訳表示は False で UI の 1秒 STOP を回避。
         """
         with _llm_priority_lock.context(priority):
-            res = self._call_chat_completions(
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                temperature=temperature,
-                max_tokens=max_tokens,
-            )
+            res: Optional[str] = None
+            if use_llama:
+                res = self._call_chat_completions(
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    base_url=config.LLAMA_BASE_URL,
+                    model_name=config.LLAMA_MODEL_NAME,
+                )
+            if not res and llama_fallback_to_ollama:
+                res = self._call_chat_completions(
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
         raw_out = res if res else fallback_text
         return self.normalize_dm_newlines(raw_out)
 
@@ -408,19 +475,33 @@ class LLMClient:
         temperature: float = 0.4,
         max_tokens: int = 750,
         priority: int = Priority.HIGH,
+        use_llama: bool = True,
     ) -> Dict[str, Any]:
         """
         JSON 生成（Ticket 2.1: PriorityLock で直列化）。
         引数・優先度仕様は generate_text と同一。
+        use_llama=True（デフォルト）: llama.cpp 優先 → Ollama フォールバック。
         """
         with _llm_priority_lock.context(priority):
-            res = self._call_chat_completions(
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                json_mode=True,
-            )
+            res: Optional[str] = None
+            if use_llama:
+                res = self._call_chat_completions(
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    json_mode=True,
+                    base_url=config.LLAMA_BASE_URL,
+                    model_name=config.LLAMA_MODEL_NAME,
+                )
+            if not res:
+                res = self._call_chat_completions(
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    json_mode=True,
+                )
         if res:
             parsed = self.extract_json_object(res, default=None)
             if parsed:
@@ -613,6 +694,8 @@ class LLMClient:
             temperature=0.65,
             max_tokens=300,
             fallback_text=fallback_en,
+            # llama.cpp 応答不能時は即辞書フォールバック（UIの1秒STOP回避）
+            llama_fallback_to_ollama=False,
         )
         cleaned = self.normalize_dm_newlines(generated.strip().strip('"'))
         return self._restore_multiline_if_collapsed(jp_clean, cleaned)
@@ -680,8 +763,10 @@ class LLMClient:
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             temperature=0.3,
-            max_tokens=300,
+            max_tokens=400,
             fallback_text=fallback_ja,
+            # llama.cpp 応答不能時は Ollama（5秒）に落ちず即辞書フォールバック（UIの1秒STOP回避）
+            llama_fallback_to_ollama=False,
         )
         cleaned_ja = self.normalize_dm_newlines(generated.strip().strip('"'))
         # 万が一LLMが英語のまま返した場合（日本語文字が含まれない場合）はフォールバック日本語訳を使用
@@ -718,6 +803,8 @@ class LLMClient:
             temperature=0.4,
             max_tokens=250,
             fallback_text=fallback_en,
+            # llama.cpp 応答不能時は即辞書フォールバック（UIの1秒STOP回避）
+            llama_fallback_to_ollama=False,
         )
         cleaned = self.normalize_dm_newlines(generated.strip().strip('"'))
         return self._restore_multiline_if_collapsed(raw, cleaned)

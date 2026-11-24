@@ -244,7 +244,9 @@ def run_all_phase2_tests() -> None:
         assert rev_res["revived_count"] == 1, f"Expected 1 dormant VIP, got: {rev_res}"
         rev_item = rev_res["results"][0]
         assert rev_item["fan_id"] == "dormant_vip_1"
-        assert len(rev_item["content"]) > 15 and len(rev_item["content_ja"]) > 5
+        assert len(rev_item["content"]) > 15
+        # [オンデマンド翻訳] 復活DMの content_ja は受信時空（表示時 API でオンデマンド生成）
+        assert not rev_item.get("content_ja"), "content_ja must be empty at save time (on-demand translation)"
         assert rev_item["queued"]["fan_id"] == "dormant_vip_1"
         assert rev_item["queued"]["source"] == "dormant_revival"
         assert test_bot_mgr.get_status(char_id)["char_status"]["queued_count"] == 1

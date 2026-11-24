@@ -1020,6 +1020,13 @@ def api_simulator_reply():
             "unlock_status_ja": "未購入",
         }
 
+    # [オンデマンド翻訳] sales_engine が ai_ja を空で返すため、
+    # シミュレーターのリアルタイム表示用にここで llama.cpp で即翻訳する。
+    ai_en_out = str(result.get("ai_en") or result.get("ai_reply") or "")
+    ai_ja_out = str(result.get("ai_ja") or result.get("ai_reply_ja") or "")
+    if ai_en_out and not ai_ja_out:
+        ai_ja_out = llm_client.translate_to_japanese(ai_en_out)
+
     if record_messages and fan_id:
         add_dm_message(
             char_id=char_id,
@@ -1036,8 +1043,8 @@ def api_simulator_reply():
             char_id=char_id,
             fan_id=fan_id,
             sender="ai",
-            content=str(result.get("ai_en") or result.get("ai_reply") or ""),
-            content_ja=str(result.get("ai_ja") or result.get("ai_reply_ja") or ""),
+            content=ai_en_out,
+            content_ja=ai_ja_out,
             sales_phase=next_phase_out,
             prompt_version=str(result.get("prompt_version") or "v1-sim"),
             decision_log=result.get("decision_log"),
@@ -1072,10 +1079,10 @@ def api_simulator_reply():
             "tip_tx_id": result.get("tip_tx_id"),
             "fan_en": fan_en,
             "fan_ja": fan_ja,
-            "ai_en": result.get("ai_en"),
-            "ai_ja": result.get("ai_ja"),
-            "ai_reply": result.get("ai_reply"),
-            "ai_reply_ja": result.get("ai_reply_ja"),
+            "ai_en": ai_en_out,
+            "ai_ja": ai_ja_out,
+            "ai_reply": ai_en_out,
+            "ai_reply_ja": ai_ja_out,
             "psych_profile": result.get("psych_profile"),
             "decision_log": result.get("decision_log"),
             "profile_prompt_block": format_psych_profile_for_prompt(result.get("psych_profile")),

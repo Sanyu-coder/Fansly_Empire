@@ -1673,7 +1673,10 @@ class SalesEngine:
             _raw_reply = fallback_reply
         ai_reply = LLMClient.normalize_dm_newlines(_raw_reply)
 
-        ai_reply_ja = LLMClient.normalize_dm_newlines(self.llm.translate_to_japanese(ai_reply))
+        # [オンデマンド翻訳] AI返信の日本語訳は生成せず空で返す。
+        # 日本語訳は UI 表示時（スレッド詳細取得 API）にオンデマンド生成して
+        # content_ja にキャッシュする設計へ変更。
+        ai_reply_ja = ""
 
         if recommended_ppv:
             psych_profile["recommended_step"] = (

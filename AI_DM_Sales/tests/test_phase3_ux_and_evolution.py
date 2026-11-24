@@ -44,6 +44,7 @@ from app.core.database import (
     record_ppv_offer,
     set_fan_manual_hold,
 )
+from app.core.llm_client import llm_client
 from app.services.character_loader import load_settings, save_settings
 from app.services.fansly_dm_bot import bot_manager
 from app.services.optimizer_batch import extract_win_loss_threads, run_playbook_optimization
@@ -87,11 +88,15 @@ def run_all_phase3_tests() -> None:
         detail_off = get_thread_detail(char_id, "fan_off_test", db_path=test_db)
         assert len(detail_off["messages"]) == 1, "Fan message must be saved while OFF, and AI must NOT auto-reply"
         assert detail_off["messages"][0]["sender"] == "fan"
-        assert bool(detail_off["messages"][0]["content_ja"]), "Japanese translation must be saved while OFF"
+        # [オンデマンド翻訳] 受信時は content_ja が空（翻訳は表示時 API でオンデマンド生成・キャッシュ）
+        assert not detail_off["messages"][0].get("content_ja"), "content_ja must be empty at save time (on-demand translation)"
         prof_off = detail_off["fan"]["psych_profile"]
         assert len(prof_off.get("preferences") or []) > 0, "Psych profile must be updated while OFF"
         assert len(detail_off["decision_logs"]) >= 1, "Decision log must record monitor-only reasoning"
-        _log("  -> Passed: DM saved + JP translated + psych_profile updated + AI auto-reply skipped while OFF")
+        # オンデマンド生成の確認: translate_to_japanese が英語原文から日本語を返すこと
+        ja_on_demand = llm_client.translate_to_japanese(detail_off["messages"][0]["content"])
+        assert ja_on_demand, "On-demand translation must produce Japanese text"
+        _log("  -> Passed: DM saved + content_ja empty at save (on-demand) + psych_profile updated + AI auto-reply skipped while OFF")
 
         _log("=== [TEST 2] 待機カウントダウン ＋ 手動切替(スキップ) ＋ 10分放置アラート ＋ AI自動返信復帰 ＆ 手動送信解除 ===")
         save_settings(char_id, {"bot_enabled": True})

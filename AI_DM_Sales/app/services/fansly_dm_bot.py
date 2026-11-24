@@ -938,28 +938,22 @@ class CharacterBotWorker:
                 already_recorded_fan_msg = True
 
         if not already_recorded_fan_msg:
-            # [Ticket 2.2] 受信DMの日本語訳も不屈リトライで保護 (VRAM競合で失敗しても破棄しない)
-            try:
-                fan_msg_ja = execute_with_resilient_retry(
-                    lambda: llm_client.translate_to_japanese(fan_message_en),
-                    task_name=f"translate_fan_msg_{fan_id}",
-                    db_path=db_path,
-                )
-            except LLMResilientRetryExhaustedError:
-                fan_msg_ja = ""  # 復旧しない場合のみ空文字で進め受信処理を破棄しない
+            # [オンデマンド翻訳] 受信時は日本語訳を生成せず content_ja を空で保存。
+            # 日本語訳は UI 表示時（スレッド詳細取得 API）にオンデマンド生成して
+            # content_ja にキャッシュする設計に変更（派生データの永続化を回避）。
             saved_fan_msg = add_dm_message(
                 char_id=self.char_id,
                 fan_id=fan_id,
                 sender="fan",
                 content=fan_message_en,
                 sales_phase=sales_phase,
-                content_ja=fan_msg_ja,
+                content_ja="",
                 db_path=db_path,
             )
             recent_messages.append(saved_fan_msg)
             logger.info(
                 f"[{self.char_id}] Saved incoming DM from @{fan_id} ({username}) to DB: "
-                f"en='{fan_message_en[:80]}' / ja='{fan_msg_ja[:60]}'"
+                f"en='{fan_message_en[:80]}' (ja=on-demand, not translated yet)"
             )
         else:
             logger.info(f"[{self.char_id}] Checking pending message for @{fan_id} (already in DB)")

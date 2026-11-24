@@ -16,6 +16,11 @@ PROFILES_DIR = os.environ.get("PROFILES_DIR") or os.path.join(BASE_DIR, "profile
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434/v1")
 MODEL_NAME = os.environ.get("MODEL_NAME", "my-qwen3:latest")
 
+# llama.cpp サーバー（Ollama 未起動・VRAM 競合時に優先的に割り込んで使用）
+# OpenAI 互換 /v1/chat/completions 対応。私を動かしている llama.cpp server と同一経路。
+LLAMA_BASE_URL = os.environ.get("LLAMA_BASE_URL", "http://127.0.0.1:8080/v1")
+LLAMA_MODEL_NAME = os.environ.get("LLAMA_MODEL_NAME", "qwen3.8-27b-opencode-104k")
+
 PORT = int(os.environ.get("PORT", "5051"))
 
 # 危険ワード（検知時に即座に is_escalated = 1 へ移行）
