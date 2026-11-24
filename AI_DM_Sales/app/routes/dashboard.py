@@ -400,7 +400,9 @@ def _compute_next_transition_condition(
     cooldown_threshold = 3
     pitch_no_inv_threshold = 3  # 2_Pitch_PPV (在庫なし) → 1_Collect_Tags 復帰の往復数
 
-    if sales_phase in ("1_Collect_Tags", "", "1_Icebreak", "2_Explore"):
+    # [バグ3修正] 旧フェーズ名 (1_Icebreak / 2_Explore) は新ステートマシン移行後に
+    # 存在しないため削除。"" (未設定) と 1_Collect_Tags のみで判定する。
+    if sales_phase in ("1_Collect_Tags", ""):
         remaining_tags = max(0, target - matched_tag_count)
         remaining_turns = max(0, max_turns - state_step_turns)
         if remaining_tags == 0 and remaining_turns == 0:

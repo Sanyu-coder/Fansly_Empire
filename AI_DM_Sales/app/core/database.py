@@ -1189,7 +1189,9 @@ def upsert_fan_sales_state(
                     current_tier or "free_follower",
                     float(total_spent_usd or 0.0),
                     init_profile_str,
-                    sales_phase or "1_Icebreak",
+                    # [バグ4修正] 新規ファン作成時のデフォルトステートを新ステートマシン名の
+                    # 初期状態 (1_Collect_Tags) に変更（旧フェーズ名 1_Icebreak は廃止）
+                    sales_phase or "1_Collect_Tags",
                     int(consecutive_unanswered or 0),
                     int(consecutive_ppv_ignored or 0),
                     int(is_low_priority or 0),

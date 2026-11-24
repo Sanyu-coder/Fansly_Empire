@@ -994,11 +994,20 @@ class CharacterBotWorker:
             record_tip_in_db=False,
             db_path=db_path,
         )
+        # [バグ2修正] sales_engine が PPVスルー検出で増やした consecutive_ppv_ignored を
+        # DB に反映する（Low_Priority 降格判定のため）。engine_res に値が無ければ
+        # 既存値 (ignored_count) を保持する。
+        _updated_ignored = int(
+            engine_res.get("consecutive_ppv_ignored")
+            if engine_res.get("consecutive_ppv_ignored") is not None
+            else ignored_count
+        )
         upsert_fan_sales_state(
             char_id=self.char_id,
             fan_id=fan_id,
             username=username or fan_id,
             current_tier=detected_tier,
+            consecutive_ppv_ignored=_updated_ignored,
             db_path=db_path,
         )
         res = self._dispatch_sales_engine_reply(

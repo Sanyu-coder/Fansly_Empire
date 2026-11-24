@@ -1,3 +1,4 @@
+import json
 import os
 import re
 from datetime import datetime
@@ -1451,9 +1452,9 @@ class SalesEngine:
                 "decision_log": escalation_decision_log,
             }
 
-        # Step 2: タダ乗り客省エネ降格 (6_Low_Priority) 判定（計算リソース節約のためフル推論をスキップ）
+        # Step 2: タダ乗り客省エネ降格 (Low_Priority) 判定（計算リソース節約のためフル推論をスキップ）
         if self.check_low_priority_demotion(current_tier, consecutive_ppv_ignored):
-            next_phase = "6_Low_Priority"
+            next_phase = STATE_LOW_PRIORITY
             ai_en_low, ai_ja_low = self.generate_low_priority_reply(char_id, persona=persona)
             low_thresh = int(active_thresholds.get("1_Icebreak", 40))
             low_reason_ja = f"無料フォロワーかつPPV連続スルー {consecutive_ppv_ignored}回のため省エネモード維持 (0pt)"
@@ -1552,6 +1553,33 @@ class SalesEngine:
                 "decision_log": low_decision_log,
             }
 
+        # [天井不具合修正] update_fan_psych_profile は LLM で4項目をマージして返すため、
+        # existing_profile に含まれる _state_step_turns が破棄される。
+        # 天井判定 (state_step_turns >= 5) が機能しない根本原因。
+        # 呼び出し前に既存値を保存し、呼び出し後に復元して往復カウントの連続性を保証する。
+        _existing_profile_parsed = existing_profile_json
+        if isinstance(_existing_profile_parsed, str) and _existing_profile_parsed.strip():
+            try:
+                _existing_profile_parsed = json.loads(_existing_profile_parsed)
+            except Exception:
+                _existing_profile_parsed = {}
+        elif not isinstance(_existing_profile_parsed, dict):
+            # existing_profile_json が None の場合、DB から現在のプロファイルを読み込む
+            # (_state_step_turns の連続性を保証する)
+            _existing_profile_parsed = {}
+            if fan_id and char_id:
+                try:
+                    _fan_rec = get_fan_record(char_id, fan_id, db_path=db_path)
+                    if _fan_rec and _fan_rec.get("psych_profile_json"):
+                        _raw = _fan_rec["psych_profile_json"]
+                        if isinstance(_raw, str):
+                            _existing_profile_parsed = json.loads(_raw) if _raw.strip() else {}
+                        elif isinstance(_raw, dict):
+                            _existing_profile_parsed = _raw
+                except Exception:
+                    _existing_profile_parsed = {}
+        _saved_state_step_turns = int((_existing_profile_parsed or {}).get("_state_step_turns") or 0)
+
         # Step 3: リアルタイム顧客カルテ抽出・マージ更新
         psych_profile = update_fan_psych_profile(
             char_id=char_id,
@@ -1563,6 +1591,8 @@ class SalesEngine:
             db_path=db_path,
             persist_db=persist_db and bool(fan_id),
         )
+        # _state_step_turns を復元 (update_fan_psych_profile が破棄したため)
+        psych_profile["_state_step_turns"] = _saved_state_step_turns
 
         # ===== [Ticket 4.5] 新ステートマシンフロー =====
         from app.services import profiler_service as _prof
@@ -1601,6 +1631,13 @@ class SalesEngine:
         # 前回 PPV が提案されていたか判定 (psych_profile に recommended_ppv_id が残存 = 前回 PPV あり)
         had_ppv_prev = bool(psych_profile.get("recommended_ppv_id"))
 
+        # [バグ2修正] PPVスルー検出 (設計図 Line 89: PPV提案後、ファンがPPV無視 → consecutive_ppv_ignored +1)
+        # 条件: 前ターンにPPV提案済み 且つ 本ターンに購入意向なし → 1回スルーとしてカウント
+        # 購入発生時は mark_ppv_unlocked が DB で consecutive_ppv_ignored = 0 にリセットするため
+        # 本増加処理と矛盾しない。
+        if had_ppv_prev and not ear_result.get("has_buy_intent"):
+            consecutive_ppv_ignored = int(consecutive_ppv_ignored or 0) + 1
+
         # [破綻3修正] Escalate_Stop 解除判定: 人間の介入解除 (is_escalated=0) を検出
         is_escalated_cleared = False
         if norm_input_stage == STATE_ESCALATE and fan_id:
@@ -1626,12 +1663,11 @@ class SalesEngine:
         next_phase = new_state
 
         # state_step_turns を次ターン用に更新
-        # 遷移先が同一ステート (Collect/Cooldown) なら +1、それ以外は 0
-        # 例外: 2_Pitch_PPV (ppv=None) → 1_Collect_Tags 復帰時は必ず 0 リセット
-        if next_phase == norm_input_stage and next_phase in (STATE_COLLECT, STATE_COOLDOWN):
+        # 滞在ステート (Collect/Pitch/Cooldown) で同一ステート継続なら +1
+        # 他ステートへ遷移時は 0 リセット
+        # 例外: 2_Pitch_PPV → 1_Collect_Tags 復帰時は必ず 0 リセット (無限ループ防止)
+        if next_phase == norm_input_stage and next_phase in (STATE_COLLECT, STATE_PITCH, STATE_COOLDOWN):
             new_step_turns = state_step_turns + 1
-        elif next_phase == STATE_COLLECT and norm_input_stage == STATE_PITCH:
-            new_step_turns = 0  # 2_Pitch_PPV → 1_Collect_Tags 復帰: 無限ループ防止
         else:
             new_step_turns = 0
 
@@ -1731,6 +1767,9 @@ class SalesEngine:
                 is_escalated=0,
                 escalation_reason=None,
                 psych_profile_dict=psych_profile,
+                # [バグ1修正] fans.state_step_turns カラムを psych_profile._state_step_turns と
+                # 同期保持する（設計図 state_machine_diagram.md Line 120 の意図）
+                state_step_turns=new_step_turns,
                 db_path=db_path,
             )
             append_fan_decision_log(char_id, fan_id, decision_log, db_path=db_path)
@@ -1753,6 +1792,9 @@ class SalesEngine:
             "is_escalated": 0,
             "escalation_reason": None,
             "is_low_priority": 1 if next_phase == STATE_LOW_PRIORITY else 0,
+            # [バグ2修正] スルー検出後の consecutive_ppv_ignored を返却し、
+            # 呼び出し側 (fansly_dm_bot) が DB に書き込む際に利用できるようにする
+            "consecutive_ppv_ignored": int(consecutive_ppv_ignored or 0),
             "sales_phase": next_phase,
             "current_stage": next_phase,
             "next_stage": state_meta.get("next_transition_condition") or next_phase,
