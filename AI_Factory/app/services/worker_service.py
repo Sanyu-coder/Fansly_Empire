@@ -4,6 +4,7 @@ import json
 import uuid
 import threading
 import subprocess
+import requests
 from collections import deque
 from datetime import datetime
 from app.config import (
@@ -58,6 +59,18 @@ line2_state = {
 }
 
 worker_lock = threading.Lock()
+
+# ComfyUI 到達性確認用（第1ライン・動画ラインの実行前に起動チェック）
+COMFY_URL = "http://127.0.0.1:8188"
+
+
+def is_comfyui_running(timeout: float = 3.0) -> bool:
+    """ComfyUI が起動しているか（HTTP到達可能か）を確認する。"""
+    try:
+        resp = requests.get(f"{COMFY_URL}/system_stats", timeout=timeout)
+        return resp.status_code == 200
+    except Exception:
+        return False
 
 
 def append_log(msg, target="gpu"):
@@ -226,6 +239,14 @@ def _execute_line1_task(char_id, repeat_count, all_chars=False):
             worker_state["current_stage"] = "エラー: スクリプト不在"
         return
 
+    # ★ ComfyUI 起動確認（未起動なら実行を中止しUIへエラー通知）
+    if not is_comfyui_running():
+        append_log("❌ エラー: ComfyUI が起動していません。ComfyUI を起動してから第1ラインを実行してください。")
+        with worker_lock:
+            worker_state["current_stage"] = "エラー: ComfyUI未起動"
+            worker_state["item_progress"] = 100
+        return
+
     target_chars = _resolve_target_char_ids(char_id, all_chars=all_chars)
     total_sets = len(target_chars) * repeat_count
     scope_label = f"全キャラ ({len(target_chars)}名)" if (all_chars or len(target_chars) > 1) else f"キャラ: {target_chars[0]}"
@@ -243,70 +264,59 @@ def _execute_line1_task(char_id, repeat_count, all_chars=False):
     env["PYTHONUNBUFFERED"] = "1"
     env["SHARED_ASSETS_DIR"] = SHARED_ASSETS_DIR
 
-    global_idx = 0
+    # ★ 連続稼働モード: キャラクターごとに1サブプロセスで repeat_count セットを連続生成する。
+    #   factory_line1.py が --repeat N を受け取り1プロセス内でNセットループするため、
+    #   プロセス起動コスト×N を1回に圧縮し、ComfyUI のモデル保持を維持できる。
+    completed_offset = 0  # 複数キャラ時: 過去のキャラで完了したセット数の累計
     for c_idx, cid in enumerate(target_chars, start=1):
         if worker_state["stop_requested"]:
             break
         with worker_lock:
             worker_state["char_id"] = cid
         if len(target_chars) > 1:
-            append_log(f"👑 キャラクター切替 [{c_idx}/{len(target_chars)}]: {cid} の生産を開始します（{repeat_count} セット）")
+            append_log(f"👑 キャラクター切替 [{c_idx}/{len(target_chars)}]: {cid} の生産を開始します（{repeat_count} セット連続稼働）")
 
-        for i in range(1, repeat_count + 1):
-            if worker_state["stop_requested"]:
-                append_log("🛑 ユーザー操作により第1ラインを中断しました。")
-                with worker_lock:
-                    worker_state["current_stage"] = "ユーザー操作により中断"
-                break
+        if len(target_chars) > 1:
+            suffix = f" [{cid}]"
+        else:
+            suffix = ""
 
-            global_idx += 1
+        append_log(f"▶ 【第1ライン / {cid}】 {repeat_count} セットを連続稼働モードで実行中...（通算 {c_idx}/{len(target_chars)} キャラ）")
+        proc = subprocess.Popen(
+            [sys.executable, "-u", LINE1_SCRIPT, "--char", cid, "--repeat", str(repeat_count)],
+            cwd=BASE_DIR, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, encoding="utf-8", errors="replace", bufsize=1, env=env
+        )
+        with worker_lock:
+            worker_state["process"] = proc
+
+        for line in iter(proc.stdout.readline, ""):
+            clean = line.strip()
+            if not clean:
+                continue
+            if _consume_progress_signal(clean, stage_suffix=suffix, state_dict=worker_state, item_offset=completed_offset, fixed_total=total_sets):
+                continue
+            append_log(clean)
+
+        proc.wait()
+        with worker_lock:
+            worker_state["process"] = None
+            worker_state["completed_items"] = completed_offset + repeat_count
+            worker_state["item_progress"] = 100
+            worker_state["current_stage"] = f"[{cid}] {repeat_count} セット連続稼働完了！"
+        completed_offset += repeat_count
+        append_log(f"✅ [{cid}] {repeat_count} セットの連続稼働が完了しました！")
+
+        if worker_state["stop_requested"]:
+            append_log("🛑 ユーザー操作により第1ラインを中断しました。")
             with worker_lock:
-                worker_state["current_iter"] = global_idx
-                worker_state["completed_items"] = global_idx - 1
-                worker_state["item_progress"] = 2
-                if len(target_chars) > 1:
-                    worker_state["current_stage"] = f"[{cid}] シチュエーション生成準備中 ({global_idx}/{total_sets} セット)"
-                else:
-                    worker_state["current_stage"] = f"シチュエーション生成準備中 ({global_idx}/{total_sets} セット)"
+                worker_state["current_stage"] = "ユーザー操作により中断"
+            break
 
-            append_log(f"▶ 【第1ライン / {cid}】 {i} / {repeat_count} セット目（通算 {global_idx}/{total_sets}）の生成を実行中...")
-            proc = subprocess.Popen(
-                [sys.executable, "-u", LINE1_SCRIPT, "--char", cid],
-                cwd=BASE_DIR, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                text=True, encoding="utf-8", errors="replace", bufsize=1, env=env
-            )
-            with worker_lock:
-                worker_state["process"] = proc
-
-            if len(target_chars) > 1:
-                suffix = f" [{cid} {i}/{repeat_count} | 通算 {global_idx}/{total_sets}]"
-            else:
-                suffix = f" ({global_idx}/{total_sets}セット)" if total_sets > 1 else ""
-
-            for line in iter(proc.stdout.readline, ""):
-                clean = line.strip()
-                if not clean:
-                    continue
-                if _consume_progress_signal(clean, stage_suffix=suffix, state_dict=worker_state, item_offset=global_idx - 1, fixed_total=total_sets):
-                    continue
-                append_log(clean)
-
-            proc.wait()
-            with worker_lock:
-                worker_state["process"] = None
-
-            if worker_state["stop_requested"]:
-                append_log("🛑 ユーザー操作により第1ラインを中断しました。")
-                with worker_lock:
-                    worker_state["current_stage"] = "ユーザー操作により中断"
-                break
-
-            with worker_lock:
-                worker_state["completed_items"] = global_idx
-                worker_state["item_progress"] = 100
-                worker_state["current_stage"] = f"{global_idx}/{total_sets} セット生産完了！"
-
-            append_log(f"✅ [{cid}] {i} / {repeat_count} セット目（通算 {global_idx}/{total_sets}）の生産完了！")
+        with worker_lock:
+            worker_state["item_progress"] = 100
+            worker_state["current_stage"] = f"[{cid}] {repeat_count} セット連続稼働完了！"
+        append_log(f"✅ [{cid}] {repeat_count} セットの連続稼働が完了しました！")
 
     if not worker_state["stop_requested"]:
         append_log(f"🎉 第1ラインの全工程（合計 {total_sets} セット）が完了しました！")
@@ -321,6 +331,14 @@ def _execute_video_task(char_id, all_chars=False):
         append_log(f"❌ エラー: 動画ワーカーが見つかりません -> {VIDEO_SCRIPT}")
         with worker_lock:
             worker_state["current_stage"] = "エラー: 動画スクリプト不在"
+        return
+
+    # ★ ComfyUI 起動確認（未起動なら実行を中止しUIへエラー通知）
+    if not is_comfyui_running():
+        append_log("❌ エラー: ComfyUI が起動していません。ComfyUI を起動してから動画生成を実行してください。")
+        with worker_lock:
+            worker_state["current_stage"] = "エラー: ComfyUI未起動"
+            worker_state["item_progress"] = 100
         return
 
     target_chars = _resolve_target_char_ids(char_id, all_chars=all_chars)
@@ -448,6 +466,17 @@ def enqueue_gpu_task(line: str, char_id: str, repeat: int = 1, all_chars: bool =
     現在GPUワーカーが未稼働なら即座にコンシューマスレッドを起動し、稼働中なら待機キューに積む。
     """
     global gpu_consumer_running
+
+    # ★ ComfyUI 起動確認（line1 / video は ComfyUI 必須。未起動ならキュー登録前に中断）
+    if line in ("line1", "video") and not is_comfyui_running():
+        line_label = "第1ライン" if line == "line1" else "動画生成"
+        append_log(f"❌ エラー: ComfyUI が起動していません。{line_label}の実行を中止します。")
+        return {
+            "ok": False,
+            "error": "ComfyUI が起動していません。ComfyUI を起動してから実行してください。",
+            "comfyui_down": True,
+        }
+
     is_all = bool(all_chars) or str(char_id or "").strip().upper() in (ALL_CHARS_SENTINEL, "ALL_CHARS", "__ALL__")
     norm_char = ALL_CHARS_SENTINEL if is_all else (char_id or "queen_lilith")
     repeat_clamped = max(1, min(LINE1_MAX_REPEAT, int(repeat or 1))) if line == "line1" else 1

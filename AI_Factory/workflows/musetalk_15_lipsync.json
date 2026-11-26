@@ -1,0 +1,70 @@
+{
+  "1": {
+    "inputs": {
+      "video": "base_motion.mp4",
+      "force_rate": 16,
+      "custom_width": 0,
+      "custom_height": 0,
+      "frame_load_cap": 81,
+      "skip_first_frames": 0,
+      "select_every_nth": 1,
+      "format": "AnimateDiff"
+    },
+    "class_type": "VHS_LoadVideo",
+    "_meta": {
+      "title": "Load Base I2V Video (16fps)"
+    }
+  },
+  "2": {
+    "inputs": {
+      "audio": "lilith_voice_ok.wav",
+      "audioUI": "/api/view?filename=lilith_voice_ok.wav&type=input&subfolder=&rand=0.37821807132382235"
+    },
+    "class_type": "LoadAudio",
+    "_meta": {
+      "title": "Load Gated Audio (5.0s WAV)"
+    }
+  },
+  "3": {
+    "inputs": {
+      "UNKNOWN": true,
+      "images": [
+        "1",
+        0
+      ],
+      "audio": [
+        "2",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "MuseTalk 1.5 LipSync"
+    }
+  },
+  "4": {
+    "inputs": {
+      "frame_rate": 16,
+      "loop_count": 0,
+      "filename_prefix": "video/Lilith_MuseTalk15",
+      "format": "video/h264-mp4",
+      "pix_fmt": "yuv420p",
+      "crf": 19,
+      "save_metadata": false,
+      "trim_to_audio": false,
+      "pingpong": false,
+      "save_output": true,
+      "images": [
+        "3",
+        0
+      ],
+      "audio": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "VHS_VideoCombine",
+    "_meta": {
+      "title": "Video Combine (LipSynced MP4)"
+    }
+  }
+}

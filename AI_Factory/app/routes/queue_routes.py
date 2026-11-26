@@ -437,14 +437,26 @@ def auto_finalize_folder_to_ready(char_id: str, folder: str) -> dict:
 # ==========================================
 # 手動スケジュール枠設定 API（最大10枠・標準プリセット廃止）
 # ==========================================
+def _clamp_pct(val, default):
+    """pct値を 0-100 の整数に正規化（5刻みはフロント側で保証）"""
+    try:
+        iv = int(val)
+    except (TypeError, ValueError):
+        return default
+    return max(0, min(100, iv))
+
+
 @queue_bp.route("/api/schedule_settings/<char_id>", methods=["GET"])
 def api_get_schedule_settings(char_id):
     slots = get_schedule_slots(char_id)
+    prof = load_char_profile(char_id)
     return jsonify({
         "ok": True,
         "char_id": char_id,
         "slots": slots,
         "schedule_slots": slots,
+        "exposure_erotic_pct": int(prof.get("exposure_erotic_pct", 80)),
+        "caption_question_pct": int(prof.get("caption_question_pct", 75)),
     })
 
 
@@ -455,11 +467,24 @@ def api_save_schedule_settings(char_id):
     saved, err = save_schedule_slots(char_id, raw_slots)
     if err:
         return jsonify({"ok": False, "error": err}), 400
+
+    # ★ 露出度・問いかけ頻度（%）を profile.json に保存
+    paths = get_char_paths(char_id)
+    profile_path = paths["profile"]
+    prof = load_char_profile(char_id)
+    prof["exposure_erotic_pct"] = _clamp_pct(data.get("exposure_erotic_pct"), prof.get("exposure_erotic_pct", 80))
+    prof["caption_question_pct"] = _clamp_pct(data.get("caption_question_pct"), prof.get("caption_question_pct", 75))
+    os.makedirs(os.path.dirname(profile_path), exist_ok=True)
+    with open(profile_path, "w", encoding="utf-8") as f:
+        json.dump(prof, f, ensure_ascii=False, indent=2)
+
     return jsonify({
         "ok": True,
         "char_id": char_id,
         "slots": saved,
         "schedule_slots": saved,
+        "exposure_erotic_pct": prof["exposure_erotic_pct"],
+        "caption_question_pct": prof["caption_question_pct"],
     })
 
 

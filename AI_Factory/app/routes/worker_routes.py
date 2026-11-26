@@ -1,6 +1,7 @@
 import os
 import json
 import shutil
+import subprocess
 from datetime import datetime
 from flask import Blueprint, request, jsonify, Response
 
@@ -22,6 +23,7 @@ from app.services.worker_service import (
     get_gpu_queue_snapshot,
     start_line2_parallel,
     stop_workers,
+    is_comfyui_running,
 )
 from app.services.character_service import get_char_paths
 from app.services.file_service import get_videos_in_dir, get_images_in_dir, normalize_video_model
@@ -158,6 +160,54 @@ def api_run_video():
     all_chars = bool(data.get("all_chars")) or str(char_id).strip().upper() == "ALL"
     res = enqueue_gpu_task("video", char_id=char_id, repeat=1, all_chars=all_chars)
     return jsonify(res)
+
+
+# ── ComfyUI 起動 / 状態確認 ──────────────────────────────────────────────
+COMFYUI_LAUNCH_BAT = r"C:\ComfyUI\ComfyUI_app.bat"
+
+@worker_bp.route("/api/comfyui/status", methods=["GET"])
+def api_comfyui_status():
+    """ComfyUI の起動状態を返す"""
+    running = is_comfyui_running(timeout=3.0)
+    return jsonify({"ok": True, "comfyui_running": running})
+
+
+@worker_bp.route("/api/comfyui/launch", methods=["POST"])
+def api_comfyui_launch():
+    """ComfyUI を bat スクリプトで起動する（バックグラウンド）"""
+    if not os.path.exists(COMFYUI_LAUNCH_BAT):
+        return jsonify({"ok": False, "error": f"起動スクリプトが見つかりません: {COMFYUI_LAUNCH_BAT}"}), 404
+
+    # ComfyUI が既に起動済みなら何もしない
+    if is_comfyui_running(timeout=2.0):
+        return jsonify({"ok": True, "already_running": True, "message": "ComfyUI は既に起動しています"})
+
+    try:
+        # bat を新しいコンソールウィンドウで起動（CREATE_NEW_CONSOLE）
+        subprocess.Popen(
+            ["cmd", "/c", COMFYUI_LAUNCH_BAT],
+            cwd=r"C:\ComfyUI",
+            creationflags=0x00000010,  # CREATE_NEW_CONSOLE
+        )
+        # 1秒待ってから PowerShell でウィンドウを最小化
+        import time
+        time.sleep(1.0)
+        subprocess.Popen([
+            "powershell", "-NoProfile", "-Command",
+            "$p = Get-Process cmd -ErrorAction SilentlyContinue | Sort-Object StartTime -Descending | Select-Object -First 1; "
+            "if ($p -and $p.MainWindowHandle -ne 0) { "
+            "Add-Type -MemberDefinition '[DllImport(\"user32.dll\")] public static bool ShowWindow(IntPtr hWnd, int nCmdShow);' -Name Win32 -PassThru | "
+            "ForEach-Object { $_::ShowWindow([IntPtr]$p.MainWindowHandle, 6) } "
+            "}"  # 6 = SW_MINIMIZE
+        ])
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"ComfyUI の起動に失敗しました: {e}"}), 500
+
+    return jsonify({
+        "ok": True,
+        "already_running": False,
+        "message": "ComfyUI の起動を開始しました。モデル読み込みまで 1〜2分 程度かかることがあります。",
+    })
 
 
 @worker_bp.route("/api/run/line2", methods=["POST"])

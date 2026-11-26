@@ -1,0 +1,67 @@
+{
+  "2": {
+    "inputs": {
+      "language": "F5TTS_v1_Base",
+      "device": "auto",
+      "temperature": 1.0,
+      "speed": 0.95,
+      "target_rms": 0.08,
+      "cross_fade_duration": 0.15,
+      "nfe_step": 32,
+      "cfg_strength": 4
+    },
+    "class_type": "F5TTSEngineNode",
+    "_meta": {
+      "title": "⚙️ F5 TTS Engine"
+    }
+  },
+  "3": {
+    "inputs": {
+      "srt_content": "1\n00:00:00,000 --> 00:00:05,000\nYou dare keep me waiting like this, you insolent fool?",
+      "narrator_voice": "voices_examples/Lilith.wav",
+      "seed": 574048951,
+      "timing_mode": "smart_natural",
+      "enable_audio_cache": false,
+      "fade_for_StretchToFit": 0.088,
+      "max_stretch_ratio": 1,
+      "min_stretch_ratio": 1,
+      "timing_tolerance": 2,
+      "batch_size": 0,
+      "use_native_duration_targeting": false,
+      "TTS_engine": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "UnifiedTTSSRTNode",
+    "_meta": {
+      "title": "📺 TTS SRT"
+    }
+  },
+  "4": {
+    "inputs": {
+      "volume": -3,
+      "audio": [
+        "3",
+        0
+      ]
+    },
+    "class_type": "AudioAdjustVolume",
+    "_meta": {
+      "title": "Adjust Audio Volume"
+    }
+  },
+  "5": {
+    "inputs": {
+      "filename_prefix": "audio/tts_gate_raw",
+      "audio": [
+        "4",
+        0
+      ]
+    },
+    "class_type": "SaveAudio",
+    "_meta": {
+      "title": "Save Audio"
+    }
+  }
+}

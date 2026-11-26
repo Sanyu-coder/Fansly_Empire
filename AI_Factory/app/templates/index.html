@@ -2337,6 +2337,40 @@
             </button>
           </div>
         </div>
+
+        <div class="settings-section-card" style="margin-top:14px;">
+          <div class="form-label">
+            <span>📊 第1ライン 出力頻度設定（5%刻み）</span>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:14px; padding:12px 14px;">
+            <!-- 露出度（erotic）出現率 -->
+            <div>
+              <div style="display:flex; justify-content:space-between; align-items:center; font-size:12px; margin-bottom:6px;">
+                <span style="font-weight:700; color:#f0abfc;">🔥 露出度（erotic）出現率</span>
+                <span id="exposure-pct-label" style="font-weight:800; font-size:14px; color:#f0abfc;">80%</span>
+              </div>
+              <input type="range" id="exposure-erotic-pct" min="0" max="100" step="5" value="80"
+                     style="width:100%; accent-color:#f0abfc;"
+                     oninput="document.getElementById('exposure-pct-label').textContent = this.value + '%'">
+              <div style="font-size:11px; color:#94a3b8; margin-top:4px;">
+                露出の多い（裸・ブラ1枚・股間露出等）画像の出現頻度。残りは落ち着いた(calm)画像。
+              </div>
+            </div>
+            <!-- 問いかけ型キャプション出現率 -->
+            <div>
+              <div style="display:flex; justify-content:space-between; align-items:center; font-size:12px; margin-bottom:6px;">
+                <span style="font-weight:700; color:#7dd3fc;">💬 問いかけ型キャプション出現率</span>
+                <span id="question-pct-label" style="font-weight:800; font-size:14px; color:#7dd3fc;">75%</span>
+              </div>
+              <input type="range" id="caption-question-pct" min="0" max="100" step="5" value="75"
+                     style="width:100%; accent-color:#7dd3fc;"
+                     oninput="document.getElementById('question-pct-label').textContent = this.value + '%'">
+              <div style="font-size:11px; color:#94a3b8; margin-top:4px;">
+                閲覧者にコメント返信を促す問いかけ型キャプション（playful_question）の出現頻度。残りは他トーン。
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn-sub" style="border-color:rgba(56,189,248,0.45); color:#7dd3fc;" onclick="openManualModal()">
@@ -2861,7 +2895,10 @@
       el.textContent = msg;
       el.style.display = 'block';
       clearTimeout(el._timer);
-      el._timer = setTimeout(() => { el.style.display = 'none'; }, durationMs);
+      if (durationMs > 0) {
+        el._timer = setTimeout(() => { el.style.display = 'none'; }, durationMs);
+      }
+      // durationMs <= 0 → 自動非表示なし（手動で hideToast() を呼ぶ）
     }
     async function loadCharacters() {
       try {
@@ -3175,6 +3212,15 @@
         if (data.ok && Array.isArray(data.schedule_slots)) {
           scheduleSlots = data.schedule_slots;
         }
+        // ★ 露出度・問いかけ頻度スライダーの値を設定
+        if (data.ok) {
+          const expPct = Number(data.exposure_erotic_pct) || 80;
+          const qstPct = Number(data.caption_question_pct) || 75;
+          const expSlider = document.getElementById('exposure-erotic-pct');
+          const qstSlider = document.getElementById('caption-question-pct');
+          if (expSlider) { expSlider.value = expPct; document.getElementById('exposure-pct-label').textContent = expPct + '%'; }
+          if (qstSlider) { qstSlider.value = qstPct; document.getElementById('question-pct-label').textContent = qstPct + '%'; }
+        }
       } catch (e) {}
 
       modalEditingSlots = [...scheduleSlots].slice(0, 10);
@@ -3252,11 +3298,21 @@
         return;
       }
 
+      // ★ スライダー値を取得
+      const expSlider = document.getElementById('exposure-erotic-pct');
+      const qstSlider = document.getElementById('caption-question-pct');
+      const exposurePct = expSlider ? Number(expSlider.value) : 80;
+      const questionPct = qstSlider ? Number(qstSlider.value) : 75;
+
       const [res, hlData] = await Promise.all([
         fetch(`/api/schedule_settings/${encodeURIComponent(currentCharId)}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ schedule_slots: cleaned, slots: cleaned }),
+          body: JSON.stringify({
+            schedule_slots: cleaned, slots: cleaned,
+            exposure_erotic_pct: exposurePct,
+            caption_question_pct: questionPct,
+          }),
         }),
         saveLine2HeadlessSetting(modalEditingLine2Headless),
       ]);
@@ -3271,10 +3327,11 @@
       renderTimelineQuickTimeButtons();
       closeScheduleSettingsModal();
       const modeLabel = (hlData && hlData.line2_headless) ? '👻ヘッドレス' : '🖥️画面表示';
+      const freqLabel = `露出度 ${data.exposure_erotic_pct || exposurePct}% / 問いかけ ${data.caption_question_pct || questionPct}%`;
       showToast(
         scheduleSlots.length > 0
-          ? `⚙️ 設定を保存しました（投稿枠 ${scheduleSlots.length}枠 / 第2ライン: ${modeLabel}）`
-          : `⚙️ 設定を保存しました（投稿枠クリア / 第2ライン: ${modeLabel}）`
+          ? `⚙️ 設定を保存しました（投稿枠 ${scheduleSlots.length}枠 / 第2ライン: ${modeLabel} / ${freqLabel}）`
+          : `⚙️ 設定を保存しました（投稿枠クリア / 第2ライン: ${modeLabel} / ${freqLabel}）`
       );
     }
 
@@ -4685,7 +4742,18 @@
         body: JSON.stringify({ char_id: currentCharId, repeat, all_chars: allChars }),
       });
       const data = await res.json();
-      if (!data.ok) alert(data.error);
+      if (!data.ok) {
+        if (data.comfyui_down) {
+          const launched = await launchComfyUIIfDown();
+          if (launched) {
+            // ComfyUI 起動成功 → 再実行
+            await startLine1();
+            return;
+          }
+        } else {
+          alert(data.error);
+        }
+      }
       pollWorkerOnce();
     }
 
@@ -4696,8 +4764,53 @@
         body: JSON.stringify({ char_id: currentCharId }),
       });
       const data = await res.json();
-      if (!data.ok) alert(data.error);
+      if (!data.ok) {
+        if (data.comfyui_down) {
+          const launched = await launchComfyUIIfDown();
+          if (launched) {
+            // ComfyUI 起動成功 → 再実行
+            await startVideoLine();
+            return;
+          }
+        } else {
+          alert(data.error);
+        }
+      }
       pollWorkerOnce();
+    }
+
+    /**
+     * ComfyUI が未起動の場合、ユーザーに起動を提案 → 同意なら bat で起動 → 起動完了を待機。
+     * @returns {Promise<boolean>} 起動に成功したか
+     */
+    async function launchComfyUIIfDown() {
+      const launch = confirm('ComfyUI が起動していません。\n\nComfyUI を起動しますか？\n（モデル読み込みまで 1〜2分 程度かかることがあります）');
+      if (!launch) return false;
+
+      showToast('🚀 ComfyUI を起動中...', 0); // 0 = 常時表示
+      const res = await fetch('/api/comfyui/launch', { method: 'POST' });
+      const data = await res.json();
+      if (!data.ok) {
+        showToast(`❌ ${data.error}`, 5000);
+        return false;
+      }
+      if (data.already_running) {
+        showToast('✅ ComfyUI は既に起動しています', 3000);
+        return true;
+      }
+
+      // 起動完了を待機（最大 120秒、3秒間隔でポーリング）
+      for (let i = 0; i < 40; i++) {
+        await new Promise(r => setTimeout(r, 3000));
+        const st = await fetch('/api/comfyui/status');
+        const sd = await st.json();
+        if (sd.comfyui_running) {
+          showToast('✅ ComfyUI の起動が完了しました', 3000);
+          return true;
+        }
+      }
+      showToast('⏳ ComfyUI の起動に時間がかかっています。しばらく待ってから再実行してください。', 5000);
+      return false;
     }
 
     async function startLine2() {
